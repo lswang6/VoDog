@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "VoDog";
+"NSMicrophoneUsageDescription" = "VoDogは、モバイル通信モジュールを使った音声通話にマイクを使用します。";
+"NSContactsUsageDescription" = "VoDogは、発信者の識別、通話、メッセージ送信、Mac上の連絡先管理に連絡先を使用します。";

@@ -1,0 +1,4 @@
+module CModemBridge {
+    header "../Sources/CModemBridge/include/CModemBridge.h"
+    export *
+}

@@ -1,0 +1,15 @@
+{
+  "originHash" : "f125affe89a64127f3578ca29c01fa5645307a5b5993fb13ea5c7f4fd73ec027",
+  "pins" : [
+    {
+      "identity" : "webrtc-xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/livekit/webrtc-xcframework",
+      "state" : {
+        "revision" : "d12f2d714df6237a7ad85edd23ef60536914d974",
+        "version" : "150.7871.1"
+      }
+    }
+  ],
+  "version" : 3
+}

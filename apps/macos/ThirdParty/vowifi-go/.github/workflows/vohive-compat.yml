@@ -1,0 +1,78 @@
+name: VoHive Compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      vohive-repository:
+        description: VoHive repository to test against, such as owner/repo.
+        required: false
+        default: boa-z/vohive
+      vohive-ref:
+        description: Optional branch, tag, or SHA for the VoHive checkout.
+        required: false
+        default: ""
+      compat-packages:
+        description: Optional package list for VoHive go test; blank uses the script default.
+        required: false
+        default: ""
+      compat-run:
+        description: Optional go test -run pattern; blank uses the script default.
+        required: false
+        default: ""
+      compat-build-packages:
+        description: Optional package list for an added VoHive go build check.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: Old VoHive consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOWORK: off
+
+    steps:
+      - name: Checkout vowifi-go
+        uses: actions/checkout@v4
+        with:
+          path: vowifi-go
+
+      - name: Set up pinned Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: vowifi-go/go.mod
+          cache: true
+          cache-dependency-path: |
+            vowifi-go/go.mod
+            vowifi-go/go.sum
+
+      - name: Checkout VoHive default ref
+        if: ${{ inputs.vohive-ref == '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.vohive-repository }}
+          path: vohive
+
+      - name: Checkout VoHive selected ref
+        if: ${{ inputs.vohive-ref != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.vohive-repository }}
+          ref: ${{ inputs.vohive-ref }}
+          path: vohive
+
+      - name: Run compatibility checks
+        env:
+          VOHIVE_DIR: ${{ github.workspace }}/vohive
+          GO: go
+          GOFMT: gofmt
+          VOHIVE_COMPAT_PACKAGES: ${{ inputs.compat-packages }}
+          VOHIVE_COMPAT_RUN: ${{ inputs.compat-run }}
+          VOHIVE_COMPAT_BUILD_PACKAGES: ${{ inputs.compat-build-packages }}
+        run: |
+          cd vowifi-go
+          make compat-vohive

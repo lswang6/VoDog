@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "VoDog";
+"NSMicrophoneUsageDescription" = "VoDog utilise le microphone pour les appels vocaux via votre module cellulaire.";
+"NSContactsUsageDescription" = "VoDog utilise vos contacts pour identifier les appelants, passer des appels, envoyer des messages et gérer les contacts de votre Mac.";

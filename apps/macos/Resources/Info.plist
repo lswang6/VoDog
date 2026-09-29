@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh-Hans</string>
+	<key>CFBundleDisplayName</key>
+	<string>VoDog</string>
+	<key>CFBundleExecutable</key>
+	<string>VoDog</string>
+	<key>CFBundleIconFile</key>
+	<string>VoDog.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.vodog.macos</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>en</string>
+		<string>ja</string>
+		<string>fr</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>VoDog</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.3.0</string>
+	<key>CFBundleVersion</key>
+	<string>150</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSContactsUsageDescription</key>
+	<string>用于查找、拨打、发送短信以及管理 Mac 系统通讯录中的联系人。</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 VoDog contributors</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于通过蜂窝模块在 Mac 上进行语音通话。</string>
+</dict>
+</plist>

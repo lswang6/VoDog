@@ -1,0 +1,1 @@
+{"name":"vodog-voice","private":true,"type":"module","scripts":{"test":"node --test *.test.mjs","test:media":"VOICE_RUN_GO_BRIDGE_INTEGRATION=1 node --test webrtc-go-bridge.test.mjs","smoke":"node smoke.mjs"},"dependencies":{"@roamhq/wrtc":"0.10.0","ws":"^8.18.3"}}

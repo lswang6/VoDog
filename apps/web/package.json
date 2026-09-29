@@ -1,0 +1,27 @@
+{
+  "name": "vodog-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "demo": "vite build --mode demo --outDir /tmp/vodog-web-demo && vite preview --mode demo --outDir /tmp/vodog-web-demo --host 127.0.0.1 --port 4178 --strictPort"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^13.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/react-test-renderer": "^19.1.0",
+    "react-test-renderer": "^19.1.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.0"
+  },
+  "license": "AGPL-3.0-only"
+}

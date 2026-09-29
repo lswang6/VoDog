@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "VoDog";
+"NSMicrophoneUsageDescription" = "用于通过蜂窝模块在 Mac 上进行语音通话。";
+"NSContactsUsageDescription" = "用于查找、拨打、发送短信以及管理 Mac 系统通讯录中的联系人。";

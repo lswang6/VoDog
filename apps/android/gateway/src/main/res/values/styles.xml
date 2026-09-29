@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      DayNight base: the previous Material.Light parent forced a light window background behind
+      Compose's dark scheme, which showed as a white flash on launch and a white scrim under
+      dialogs. The status/navigation bar colours are deliberately absent: MainActivity calls
+      enableEdgeToEdge(), which owns them and picks the icon polarity from the same night-mode
+      flag VoDogTheme reads.
+    -->
+    <style name="Theme.VoDog" parent="android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#2457C5</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

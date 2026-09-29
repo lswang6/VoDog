@@ -1,0 +1,9 @@
+# Pass with -Pkey=value or put non-secret values in your local Gradle properties.
+vodogApiBaseUrl=https://control.example.com/api/v1
+vodogRelayApiBaseUrl=https://relay.example.com:16800/api/v1
+vodogCellularAcceptance=false
+vodogRecordingArchive=false
+vodogRecordingArchiveMinFreeBytes=1073741824
+vodogLibopusFec=false
+vodogReceiveRecovery=false
+vodogCommandReplayHorizon=false

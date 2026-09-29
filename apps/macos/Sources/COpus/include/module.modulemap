@@ -1,0 +1,4 @@
+module COpus {
+    header "celldock_opus.h"
+    export *
+}

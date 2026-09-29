@@ -1,0 +1,13 @@
+# Local configuration and generated output
+.gradle/
+.kotlin/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+local.properties
+**/google-services.json
+*.jks
+*.keystore
+*.p12
+*.pfx
+vodog-local.properties

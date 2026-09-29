@@ -1,0 +1,76 @@
+<svg width="160" height="300" viewBox="0 0 160 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="body" x1="28" y1="18" x2="138" y2="282" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#46484B"/>
+      <stop offset="0.48" stop-color="#292B2E"/>
+      <stop offset="1" stop-color="#181A1C"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="80" y1="14" x2="80" y2="286" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#75787C"/>
+      <stop offset="0.08" stop-color="#3D4043"/>
+      <stop offset="0.9" stop-color="#17191B"/>
+      <stop offset="1" stop-color="#08090A"/>
+    </linearGradient>
+    <linearGradient id="face" x1="38" y1="28" x2="122" y2="274" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#383A3D"/>
+      <stop offset="0.5" stop-color="#292B2E"/>
+      <stop offset="1" stop-color="#202225"/>
+    </linearGradient>
+    <linearGradient id="highlight" x1="42" y1="35" x2="128" y2="262" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0.18"/>
+      <stop offset="0.35" stop-color="white" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="led" cx="0" cy="0" r="1" gradientTransform="translate(80 259) rotate(90) scale(7)">
+      <stop stop-color="#B8FFD1"/>
+      <stop offset="0.35" stop-color="#50E47F"/>
+      <stop offset="1" stop-color="#1FAA4E"/>
+    </radialGradient>
+    <pattern id="ribs" width="7" height="7" patternUnits="userSpaceOnUse">
+      <rect width="2" height="7" rx="1" fill="#0D0F10" fill-opacity="0.62"/>
+      <rect x="2" width="1" height="7" fill="white" fill-opacity="0.08"/>
+    </pattern>
+    <filter id="shadow" x="5" y="2" width="150" height="296" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="ledGlow" x="68" y="247" width="24" height="24" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+    <clipPath id="faceClip">
+      <rect x="31" y="19" width="98" height="262" rx="13"/>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <rect x="25" y="13" width="110" height="274" rx="17" fill="url(#rim)"/>
+    <rect x="28" y="16" width="104" height="268" rx="15" fill="url(#body)"/>
+    <rect x="31" y="19" width="98" height="262" rx="13" fill="url(#face)"/>
+
+    <g clip-path="url(#faceClip)">
+      <rect x="31" y="19" width="98" height="132" fill="url(#ribs)"/>
+      <rect x="31" y="145" width="98" height="2" fill="#0D0F10" fill-opacity="0.65"/>
+      <rect x="31" y="147" width="98" height="134" fill="#242629"/>
+      <path d="M34 22H126V278H34V22Z" fill="url(#highlight)"/>
+      <path d="M31 28C31 23.0294 35.0294 19 40 19H120C124.971 19 129 23.0294 129 28V34H31V28Z" fill="white" fill-opacity="0.06"/>
+    </g>
+
+    <rect x="31.5" y="19.5" width="97" height="261" rx="12.5" stroke="white" stroke-opacity="0.13"/>
+    <path d="M38 276H122" stroke="#090A0B" stroke-width="2" stroke-linecap="round"/>
+
+    <g transform="translate(65 181.82) scale(0.06536)">
+      <path fill-rule="evenodd" clip-rule="evenodd" d="M306.331 20.0406C325.805 37.2215 344.476 55.858 363.532 73.5621C385.902 95.1096 409.466 116.355 431.287 138.352C439.715 147.347 445.876 157.692 449.787 169.386C456.513 189.919 453.534 215.555 454.271 237.014C454.32 237.308 454.361 237.602 454.41 237.897C454.042 237.823 453.788 237.962 453.648 238.314C453.641 256.034 453.625 273.755 453.608 291.476C453.543 292.113 453.796 292.539 454.369 292.751C454.451 310.978 454.508 329.206 454.524 347.434C454.729 385.337 454.688 423.231 454.41 461.125C454.401 472.729 453.092 484.186 450.475 495.479C445.753 509.781 437.473 521.606 425.642 530.961C410.317 543.399 393.38 545.722 374.267 546.67C317.565 547.626 260.406 547.046 203.639 547.504C166.386 547.701 129.133 547.66 91.8809 547.373C73.3403 546.703 54.8326 545.909 38.9431 535.148C24.8946 525.703 15.0516 513.011 9.42235 497.065C4.91405 480.408 5.13501 462.737 4.75864 445.604C4.69318 434.148 4.64405 422.699 4.61951 411.243C4.52132 339.281 4.43952 267.328 4.38225 195.366C4.39861 168.102 4.34132 140.83 4.21041 113.566C4.18586 105.945 4.23496 98.332 4.37406 90.7102C4.35769 79.998 5.17591 69.3507 6.84504 58.7691C9.04601 47.5823 13.7424 37.5568 20.9263 28.6842C27.0955 21.2426 34.353 15.1014 42.715 10.2522C55.2499 3.40761 67.9484 1.90293 81.9805 1.08519C138.788 -0.14961 196.365 0.210201 253.247 0.422816C273.194 0.856223 290.892 7.39819 306.331 20.0406Z" fill="#F4F6F8"/>
+      <g fill="#3986E8" opacity="0.9">
+        <path d="M67.5297 348.301H134.717C144.1 348.301 151.706 355.903 151.706 365.281V407.732H67.5297V348.301Z"/>
+        <path d="M279.902 245.648H345.544C370.707 245.648 391.107 266.035 391.107 291.186V291.957H279.902V245.648Z"/>
+        <path d="M391.879 318.2H279.902V383.805H391.879V318.2Z"/>
+        <path d="M279.902 410.819H391.879V439.377C391.879 464.526 371.479 484.915 346.316 484.915H279.902V410.819Z"/>
+        <path d="M67.5297 433.974H151.706V484.915H113.866C88.2752 484.915 67.5297 464.181 67.5297 438.605V433.974Z"/>
+        <path d="M253.645 485.687H178.735V366.053C178.735 341.329 158.681 321.287 133.944 321.287H67.5297V291.186C67.5297 266.035 87.9292 245.648 113.093 245.648H253.645V485.687Z"/>
+      </g>
+    </g>
+
+    <circle cx="80" cy="259" r="8" fill="#42DB73" fill-opacity="0.28" filter="url(#ledGlow)"/>
+    <circle cx="80" cy="259" r="3.5" fill="url(#led)"/>
+    <circle cx="80" cy="259" r="2.75" stroke="white" stroke-opacity="0.35" stroke-width="0.5"/>
+  </g>
+</svg>

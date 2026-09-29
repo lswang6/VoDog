@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_race:
+        description: Run optional race tests after the default CI suite.
+        required: false
+        type: boolean
+        default: false
+      run_coverage:
+        description: Run optional coverage tests after the default CI suite.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION_FILE: go.mod
+  GOWORK: off
+
+jobs:
+  go:
+    name: Go CI (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: go.mod minimum
+            go-version-file: go.mod
+            go-version: ""
+          - name: latest 1.26 patch
+            go-version-file: ""
+            go-version: 1.26.x
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go from go.mod
+        if: ${{ matrix.go-version-file != '' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.go-version-file }}
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
+
+      - name: Set up Go version
+        if: ${{ matrix.go-version != '' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
+
+      - name: Run local CI entry point
+        env:
+          GO: go
+          GOFMT: gofmt
+        run: make ci
+
+      - name: Run optional race tests
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_race == true }}
+        env:
+          GO: go
+          GOFMT: gofmt
+        run: make race
+
+      - name: Run optional coverage tests
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_coverage == true }}
+        env:
+          GO: go
+          GOFMT: gofmt
+          CI_COVERAGE_FILE: ${{ runner.temp }}/coverage.out
+        run: make coverage

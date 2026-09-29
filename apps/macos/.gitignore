@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+*.dSYM
+
+# Swift Package Manager
+.build/
+.build-*/
+.swiftpm/
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+output/
+outputs/
+tmp/
+*.app
+*.zip
+
+# Project-specific
+website/
+.codex/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
+
+# Optional firmware/runtime payloads are not part of the public source export.
+Resources/ModuleVoice/
+*.ko
+*.armv7
+*.payload

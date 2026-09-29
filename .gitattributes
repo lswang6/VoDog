@@ -1,0 +1,12 @@
+# Preserve upstream dependency bytes; keep GitHub's language summary focused on application code.
+apps/macos/Sources/COpus/opus/** linguist-vendored
+apps/macos/Sources/CEuiccCore/Vendor/** linguist-vendored
+apps/macos/ThirdParty/vowifi-go/vendor/** linguist-vendored
+apps/android/gateway/third_party/** linguist-vendored
+infra/pixel/external/** linguist-vendored
+*.png binary
+*.icns binary
+*.jar binary
+*.tar.gz binary
+*.zip binary
+*.apk binary

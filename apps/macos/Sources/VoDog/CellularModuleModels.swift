@@ -1,0 +1,123 @@
+import Foundation
+
+struct CellularModuleSummary: Identifiable, Equatable {
+    let id: CellularModuleID
+    let displayName: String
+    let modem: ModemSnapshot
+    let network: CellularNetworkStatus
+    let cardKind: SubscriberCardKind
+    let isActiveSession: Bool
+    let isPrimaryData: Bool
+
+    var carrierName: String {
+        let carrier = modem.operatorName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return carrier?.isEmpty == false ? carrier! : L10n.tr("运营商未识别")
+    }
+
+    var localizedDisplayName: String {
+        let components = displayName.split(separator: " ", omittingEmptySubsequences: true)
+        guard components.count == 2,
+              components[0] == "模组",
+              let index = Int64(components[1]) else {
+            return displayName
+        }
+        return L10n.tr("模组 %lld", index)
+    }
+
+    var technologyName: String? {
+        let technology = modem.accessTechnology?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return technology?.isEmpty == false ? technology : nil
+    }
+
+    var simSuffix: String? {
+        guard let iccid = modem.simICCID, iccid.count >= 4 else { return nil }
+        return String(iccid.suffix(4))
+    }
+
+    var isCommunicationEligible: Bool {
+        isActiveSession && modem.isConnected && modem.simReady
+    }
+
+    var isDataEligible: Bool {
+        isCommunicationEligible && modem.usbNetMode == 1
+    }
+
+    var selectorTitle: String {
+        [localizedDisplayName, modem.simReady ? carrierName : nil, technologyName]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+
+    var accessibilitySummary: String {
+        var parts = [localizedDisplayName, statusText]
+        if modem.simReady {
+            parts.append(carrierName)
+            if let technologyName { parts.append(technologyName) }
+            if let signalDBm = modem.signalDBm {
+                parts.append(L10n.tr("信号 %lld dBm", Int64(signalDBm)))
+            }
+        }
+        if isPrimaryData { parts.append(L10n.tr("主上网")) }
+        return parts.joined(separator: "，")
+    }
+
+    var statusText: String {
+        if modem.isConnected && !isActiveSession && modem.simState == .unavailable {
+            return L10n.tr("已发现")
+        }
+        switch modem.simState {
+        case .unavailable:
+            return modem.isConnected ? L10n.tr("等待 SIM") : L10n.tr("已断开")
+        case .initializing: return L10n.tr("正在读取 SIM")
+        case .absent: return L10n.tr("未插入 SIM")
+        case .pinRequired: return L10n.tr("需要 SIM PIN")
+        case .pukRequired: return L10n.tr("需要 SIM PUK")
+        case .ready: return isActiveSession ? L10n.tr("已连接") : L10n.tr("SIM 已就绪")
+        case .queryFailed: return L10n.tr("SIM 状态异常")
+        }
+    }
+}
+
+enum CellularModuleSelectionPolicy {
+    static func reconciledManagementSelection(
+        current: CellularModuleID?,
+        available: [CellularModuleID]
+    ) -> CellularModuleID? {
+        guard let first = available.first else { return nil }
+        guard let current, available.contains(current) else { return first }
+        return current
+    }
+}
+
+enum CommunicationModuleRoutingPolicy {
+    static func resolvedModuleID(
+        requested: CellularModuleID?,
+        current: CellularModuleID?,
+        fallback: CellularModuleID
+    ) -> CellularModuleID {
+        requested ?? current ?? fallback
+    }
+}
+
+enum MenuBarStatusModuleSelectionPolicy {
+    static func resolvedModuleID(
+        isCellularNetworkingEnabled: Bool,
+        primaryDataModuleID: CellularModuleID?,
+        currentCommunicationModuleID: CellularModuleID?,
+        modules: [CellularModuleSummary]
+    ) -> CellularModuleID? {
+        if isCellularNetworkingEnabled,
+           let primaryDataModuleID,
+           modules.contains(where: { $0.id == primaryDataModuleID }) {
+            return primaryDataModuleID
+        }
+
+        if let currentCommunicationModuleID,
+           let current = modules.first(where: { $0.id == currentCommunicationModuleID }),
+           current.isCommunicationEligible {
+            return currentCommunicationModuleID
+        }
+
+        return modules.first(where: \.isCommunicationEligible)?.id ?? modules.first?.id
+    }
+}

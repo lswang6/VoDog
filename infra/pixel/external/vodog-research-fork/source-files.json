@@ -1,0 +1,237 @@
+[
+  {
+    "path": "vodog-research-fork/.gitignore",
+    "sha256": "23a11f0ef0c8e03fbe8875c320067ea53565094a96cfea4d42ab94de81165615",
+    "bytes": 208
+  },
+  {
+    "path": "vodog-research-fork/LICENSE",
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "bytes": 35149
+  },
+  {
+    "path": "vodog-research-fork/README.upstream.md",
+    "sha256": "d06efcdf38bd4c1bb297bfa92e6ee08c1246dc1a421d54e591df1d76200341c7",
+    "bytes": 4613
+  },
+  {
+    "path": "vodog-research-fork/app/.gitignore",
+    "sha256": "5c3174b74edc6f2b9e0743594b8bd3c7f31e4f4405758cc9872b3fe1de1d28b4",
+    "bytes": 6
+  },
+  {
+    "path": "vodog-research-fork/app/build.gradle.kts",
+    "sha256": "1bf44daeb352ca55867f6ace60afd7cfac929a5ddabe0fa4174a7eb20347c4e7",
+    "bytes": 4532
+  },
+  {
+    "path": "vodog-research-fork/app/images/dark.png",
+    "sha256": "bba8d7efca247c6cba259cc0bcde94040929a1ffbf3ce96397cba0d84489bfc4",
+    "bytes": 99079
+  },
+  {
+    "path": "vodog-research-fork/app/images/icon.svg",
+    "sha256": "9202dcc5b3ede9375660409ce269b61fb3b6df626b923f5d113c7289d76dc6cd",
+    "bytes": 950
+  },
+  {
+    "path": "vodog-research-fork/app/images/light.png",
+    "sha256": "1870934ff466c3407a40bdc5308dd3ac173c183a1b5c752eff520fc88d68da9a",
+    "bytes": 98709
+  },
+  {
+    "path": "vodog-research-fork/app/magisk/update-binary",
+    "sha256": "bcf4b1d9913f3af17755569c853e0b5a75b8005f6a18eb3f86dadcc0e968c29d",
+    "bytes": 612
+  },
+  {
+    "path": "vodog-research-fork/app/magisk/updater-script",
+    "sha256": "d2b8203193a083e43ad076fde01b9c7821e0aa521e1f8077b8628fb1cdb70c60",
+    "bytes": 8
+  },
+  {
+    "path": "vodog-research-fork/app/magisk/updates/release/changelog.txt",
+    "sha256": "a1769d0274f57783036d754196e5362a796875ee6e56c322792ab55931a6c4f8",
+    "bytes": 79
+  },
+  {
+    "path": "vodog-research-fork/app/magisk/updates/release/info.json",
+    "sha256": "895d3e358f32f0d31c7c03fe830535118f04641647795d7701fc522707bb83c3",
+    "bytes": 254
+  },
+  {
+    "path": "vodog-research-fork/app/proguard-rules.pro",
+    "sha256": "5ebce188b285b01ecde3a42d422f30daee6ef99c5b465a6fa1428dcd45907485",
+    "bytes": 884
+  },
+  {
+    "path": "vodog-research-fork/app/src/androidTest/java/com/chiller3/bcp/ExampleInstrumentedTest.kt",
+    "sha256": "ff635b17015d542d49c4f4762d9e2524641b29fa950811fc4b74e5e48cbeb4d2",
+    "bytes": 659
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/AndroidManifest.xml",
+    "sha256": "aaf5a11bfca64bf6ac53e58243f6ace3c28b8c63af72258effac03bee50bc057",
+    "bytes": 2556
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/CallBridge.kt",
+    "sha256": "08729f2032263dda03ef49e8bdc6a8f1fe140e1d8de6d06401acf39c266f5e4b",
+    "bytes": 3439
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/CaptureThread.kt",
+    "sha256": "2fc5e1024dbb52c14d223452ff78b6b0eebd3b73749b80a7c63795f62970cce8",
+    "bytes": 5923
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/InjectPcmThread.kt",
+    "sha256": "7bb208f48ee6f1b275b9ae314d2bd36ed0c69e09337e1cbde9cee18334426bb8",
+    "bytes": 2980
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/Permissions.kt",
+    "sha256": "8d32ca077d6472b6618ef6b273e6cc51bae7cf26a0f29020b2345ed74efc9ec0",
+    "bytes": 1354
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/PlayerApplication.kt",
+    "sha256": "eeee9111590aa62ea2c83339a5c7473ae4909ecd1366c16980e471924c43767e",
+    "bytes": 1791
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/PlayerInCallService.kt",
+    "sha256": "bdbe47a90a02909453f59646c52b7e487750aa357b38e5a1ef0ddb608694b2ac",
+    "bytes": 8472
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/PlayerThread.kt",
+    "sha256": "badff4f018dd5e1c85f32092dd4c92d1a279fbb05a0b7e6acff41ef24de1900a",
+    "bytes": 12033
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/PlayerTileService.kt",
+    "sha256": "7cb95b22ad0551f512a6201d369730a57282c0a262b89c45346ff8a6fd13e3ec",
+    "bytes": 1977
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/Preferences.kt",
+    "sha256": "e4b82805c157ef706d86d3b4aa0061a23a0fbf6fca586b6a368ab64642995a38",
+    "bytes": 2021
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/SettingsActivity.kt",
+    "sha256": "1b0cd48621d2596d4f8f24466d1b07eb24696563ab98257a5696ff7fa28f6910",
+    "bytes": 5705
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/java/com/chiller3/bcp/UriExtensions.kt",
+    "sha256": "cdb87523b56225c4d07457c4130e5b41e314f901e8d29ef24e033c1641d3cea9",
+    "bytes": 1019
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/drawable-v24/ic_launcher_foreground.xml",
+    "sha256": "f648bc5e2be5042ffae7ee3768618611fab941c3f9bd91844132c7b71f06ec16",
+    "bytes": 1133
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/drawable-v24/ic_launcher_quick_settings.xml",
+    "sha256": "d4f7ad4bb6156c4462a88137e36b2b7784a59553d090e67bcc26c6d5313439f3",
+    "bytes": 1031
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/drawable/ic_launcher_background.xml",
+    "sha256": "576eac630826db5112716b8ee734aa7e61c9fb9d33256ace08c16af69193a86b",
+    "bytes": 330
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/layout/settings_activity.xml",
+    "sha256": "d97f14746c0b44e2f473dffc6be37934304b9781308dea2961bf10aa2a187c29",
+    "bytes": 540
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+    "sha256": "88f7653499ef524126ea5018a99baf9cc3269e7e584d6205dfdd76db39f39cc0",
+    "bytes": 343
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml",
+    "sha256": "88f7653499ef524126ea5018a99baf9cc3269e7e584d6205dfdd76db39f39cc0",
+    "bytes": 343
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/values/strings.xml",
+    "sha256": "07ae528ba5f078ada78c24c462a0f3f8f05396b7ca780d33f6eb16668c2122f2",
+    "bytes": 1359
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/values/themes.xml",
+    "sha256": "d86fd965cc4ba1ce2ea43eea9fb491f94b908d6786b57dc40f89020e8f42e64f",
+    "bytes": 405
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/res/xml/root_preferences.xml",
+    "sha256": "cd599ac1e816bac8092af6625b73453c5e336fdef1a7852a3386aa5c58c1a660",
+    "bytes": 1033
+  },
+  {
+    "path": "vodog-research-fork/app/src/test/java/com/chiller3/bcp/ExampleUnitTest.kt",
+    "sha256": "335753019df09eceb10e68b717f6d45d4927fb28b13f463e091a3b0e3e67989e",
+    "bytes": 340
+  },
+  {
+    "path": "vodog-research-fork/build.gradle.kts",
+    "sha256": "48f7c9d13c50fa379dce0a2b7c028bcffe60d428eada35b12cfb8af28b31c962",
+    "bytes": 142
+  },
+  {
+    "path": "vodog-research-fork/gradle.properties",
+    "sha256": "580de86208e48edae2206e167da024f17794269d296ad46a94d001c6809ba2cb",
+    "bytes": 1387
+  },
+  {
+    "path": "vodog-research-fork/gradle/wrapper/gradle-wrapper.jar",
+    "sha256": "e996d452d2645e70c01c11143ca2d3742734a28da2bf61f25c82bdc288c9e637",
+    "bytes": 59203
+  },
+  {
+    "path": "vodog-research-fork/gradle/wrapper/gradle-wrapper.properties",
+    "sha256": "efa4245a68c56c8bb873611ade567981727262d994b419f77d1be873ad6ffd02",
+    "bytes": 200
+  },
+  {
+    "path": "vodog-research-fork/gradlew",
+    "sha256": "63135287117a1e6d12c84580f1f49c61d1ba02218ecd28660605e97f976e7d65",
+    "bytes": 5766
+  },
+  {
+    "path": "vodog-research-fork/gradlew.bat",
+    "sha256": "af835f98787e9269af5a046edcb821a592fed372139df7b947b471a63cfc236b",
+    "bytes": 2763
+  },
+  {
+    "path": "vodog-research-fork/mac_bridge.py",
+    "sha256": "37e9a04908154ac3e8ad59f8a28aad037a0298b8321615a64622af370de06cb2",
+    "bytes": 4174
+  },
+  {
+    "path": "vodog-research-fork/settings.gradle.kts",
+    "sha256": "70397643444f8e813372d4e5de2b6d2ea2b05e67b7b39ae31947baa9ab4de29c",
+    "bytes": 321
+  },
+  {
+    "path": "vodog-research-fork/app/src/main/assets/tx-test.wav",
+    "sha256": "21f9cd8e991503c028eb6f075ae7fab7989a1f1243c033224e4611e4d2dac67b",
+    "bytes": 32044
+  },
+  {
+    "path": "test-audio/mac-tx-test.wav",
+    "sha256": "21f9cd8e991503c028eb6f075ae7fab7989a1f1243c033224e4611e4d2dac67b",
+    "bytes": 32044
+  },
+  {
+    "path": "vodog-research-fork/README.md",
+    "sha256": "fbfae30eabc40e978a82f1e19ebe33a963206a52148a07ec8b4e48b968d74188",
+    "bytes": 861
+  }
+]

@@ -1,0 +1,57 @@
+# Operator configuration and credentials
+.env
+.env.*
+!.env.example
+!*.env.example
+*.local
+local.properties
+google-services.json
+GoogleService-Info.plist
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+*.pem
+*.key
+# Dependency and build output
+node_modules/
+dist/
+build/
+.build/
+.gradle/
+.cxx/
+.kotlin/
+.swiftpm/
+DerivedData/
+.derivedData/
+xcuserdata/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+*.apk
+*.aab
+*.ipa
+*.dmg
+*.xcarchive
+# Runtime data
+runtime/
+recordings/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.wav
+*.mp3
+*.pcm
+# Local tools
+.DS_Store
+.idea/
+.vscode/
+.playwright-cli/
+.graft/
+graft/
+
+# Audited upstream component package, accompanied by pinned source and checksums
+!infra/pixel/external/turbo-ims/*.apk

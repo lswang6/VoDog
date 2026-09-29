@@ -1,0 +1,573 @@
+[
+  {
+    "license": "AGPL-3.0",
+    "role": "Component documentation",
+    "path": "README.md",
+    "bytes": 6259,
+    "sha256": "a3a9a39e020c401c279c0d5911013dae8cfd656b0eb2b0fe8661da9ddb61687c"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP/blob/0350949cc1a8b83bebc725cf25256b259c61edf9/LICENSE",
+    "license": "GPL-3.0",
+    "path": "bcp-upstream/licenses/LICENSE",
+    "bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP",
+    "download": "https://codeload.github.com/chenxiaolong/BCP/tar.gz/0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "commit": "0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "ref": "v1.1",
+    "license": "GPL-3.0",
+    "path": "bcp-upstream/source-0350949cc1a8b83bebc725cf25256b259c61edf9.tar.gz",
+    "bytes": 88458,
+    "sha256": "b52eb5df9c9c7a6d354e3a532d0830386d1887093cdc44f4e72a6d642ff14719"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCR/releases/tag/v3.8",
+    "download": "https://github.com/chenxiaolong/BCR/releases/download/v3.8/BCR-3.8-release.zip",
+    "license": "GPL-3.0-only",
+    "upstream_sha256": "3c8f958fcb5627f08f5362d262d3667183c669dea054a0f1b5e52b189ba60c64",
+    "path": "bcr/BCR-3.8-release.zip",
+    "bytes": 2782121,
+    "sha256": "3c8f958fcb5627f08f5362d262d3667183c669dea054a0f1b5e52b189ba60c64"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCR/releases/tag/v3.8",
+    "download": "https://github.com/chenxiaolong/BCR/releases/download/v3.8/BCR-3.8-release.zip.sig",
+    "license": "GPL-3.0-only",
+    "upstream_sha256": "8cacc2f52312df8ce74b73fa4278e52e651a6a58fff0625093e80153216e2ca7",
+    "path": "bcr/BCR-3.8-release.zip.sig",
+    "bytes": 294,
+    "sha256": "8cacc2f52312df8ce74b73fa4278e52e651a6a58fff0625093e80153216e2ca7"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCR/blob/b6c3f3d716f8f7fca7e731997c886bddd9804186/LICENSE",
+    "license": "GPL-3.0-only",
+    "path": "bcr/licenses/LICENSE",
+    "bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCR",
+    "download": "https://codeload.github.com/chenxiaolong/BCR/tar.gz/b6c3f3d716f8f7fca7e731997c886bddd9804186",
+    "commit": "b6c3f3d716f8f7fca7e731997c886bddd9804186",
+    "ref": "v3.8",
+    "license": "GPL-3.0-only",
+    "path": "bcr/source-b6c3f3d716f8f7fca7e731997c886bddd9804186.tar.gz",
+    "bytes": 709493,
+    "sha256": "cdd153a76f198768b0cab22086abfdc266c70380516d45acc827d4e57670fec8"
+  },
+  {
+    "license": "GPL-3.0",
+    "path": "gateway-installer/LICENSE",
+    "bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP/tree/0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "license": "GPL-3.0",
+    "path": "gateway-installer/SOURCE.md",
+    "bytes": 418,
+    "sha256": "70e1f8e5c1ee82a00cfeb2e1035a7c0f6cb134782267a05664345c409bc17c71"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP/tree/0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "license": "GPL-3.0",
+    "path": "gateway-installer/update-binary",
+    "bytes": 612,
+    "sha256": "bcf4b1d9913f3af17755569c853e0b5a75b8005f6a18eb3f86dadcc0e968c29d"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP/tree/0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "license": "GPL-3.0",
+    "path": "gateway-installer/updater-script",
+    "bytes": 8,
+    "sha256": "d2b8203193a083e43ad076fde01b9c7821e0aa521e1f8077b8628fb1cdb70c60"
+  },
+  {
+    "upstream": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz",
+    "license": "see COPYING",
+    "path": "libopus/licenses/COPYING",
+    "bytes": 1945,
+    "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+  },
+  {
+    "upstream": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz",
+    "download": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz",
+    "ref": "1.6.1",
+    "license": "BSD-3-Clause and patent grants in COPYING",
+    "upstream_sha256": "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1",
+    "path": "libopus/opus-1.6.1.tar.gz",
+    "bytes": 10472813,
+    "sha256": "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/Magisk/blob/e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac/LICENSE",
+    "license": "GPL-3.0",
+    "path": "magisk/licenses/LICENSE",
+    "bytes": 35141,
+    "sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/Magisk",
+    "download": "https://codeload.github.com/topjohnwu/Magisk/tar.gz/e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "commit": "e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "ref": "v30.7",
+    "license": "GPL-3.0",
+    "path": "magisk/source-e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac.tar.gz",
+    "bytes": 1591930,
+    "sha256": "743516af3bced9d983cea4fd3da2b7006af0f2f6c12756e3a1efea12a4c7e756"
+  },
+  {
+    "license": "per-file AOSP/BSD and other notices; retained verbatim",
+    "source_archive": "magisk/submodules/native__src__external__crt0/source-9dfa67b4d543f1b6bf2e936f560fbe77ca2a226a.tar.gz",
+    "path": "magisk/submodules/native__src__external__crt0/licenses/SOURCE-HEADERS.txt",
+    "bytes": 22751,
+    "sha256": "fc1463e1d5f9fa2cf02391b79e92b782c5663a1931419b9323cfd59a8398ba7b"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/crt0",
+    "download": "https://codeload.github.com/topjohnwu/crt0/tar.gz/9dfa67b4d543f1b6bf2e936f560fbe77ca2a226a",
+    "commit": "9dfa67b4d543f1b6bf2e936f560fbe77ca2a226a",
+    "ref": "native/src/external/crt0 @ e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__crt0/source-9dfa67b4d543f1b6bf2e936f560fbe77ca2a226a.tar.gz",
+    "bytes": 88146,
+    "sha256": "b31b6b6a62250716dba5ee48fd3dd52e4855e36d75e3adbd4a0de49a782d0dd6"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/cxx/blob/b09b91554b392523f633b9e3cbe0b43273528c71/LICENSE-APACHE",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__cxx-rs/licenses/LICENSE-APACHE",
+    "bytes": 9723,
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/cxx/blob/b09b91554b392523f633b9e3cbe0b43273528c71/LICENSE-MIT",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__cxx-rs/licenses/LICENSE-MIT",
+    "bytes": 1023,
+    "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/cxx",
+    "download": "https://codeload.github.com/topjohnwu/cxx/tar.gz/b09b91554b392523f633b9e3cbe0b43273528c71",
+    "commit": "b09b91554b392523f633b9e3cbe0b43273528c71",
+    "ref": "native/src/external/cxx-rs @ e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__cxx-rs/source-b09b91554b392523f633b9e3cbe0b43273528c71.tar.gz",
+    "bytes": 378348,
+    "sha256": "092b7d1c523841a00a8ef6ab65a1aefed3945e4f1b6feaecc9c2241d2e7025c6"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/libcxx/blob/d5117df3ba7704aab06c3a30b97c7529c931662b/LICENSE.TXT",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__libcxx/licenses/LICENSE.TXT",
+    "bytes": 16703,
+    "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/libcxx",
+    "download": "https://codeload.github.com/topjohnwu/libcxx/tar.gz/d5117df3ba7704aab06c3a30b97c7529c931662b",
+    "commit": "d5117df3ba7704aab06c3a30b97c7529c931662b",
+    "ref": "native/src/external/libcxx @ e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__libcxx/source-d5117df3ba7704aab06c3a30b97c7529c931662b.tar.gz",
+    "bytes": 2055938,
+    "sha256": "a12dc17776f0281e8d972706054073d47bb3acab83fe0bc3db7539db9b1fedc4"
+  },
+  {
+    "upstream": "https://github.com/LSPosed/LSPlt/blob/cef80a97a73184b4def9b3e1148884365fc173fd/LICENSE",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__lsplt/licenses/LICENSE",
+    "bytes": 7633,
+    "sha256": "09acdfb5bfb7aaed93d7d7fa5cebfc7350c555847d2ed07b5b9716da43670e04"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__lsplt/source-cef80a97a73184b4def9b3e1148884365fc173fd.tar.gz",
+    "path": "magisk/submodules/native__src__external__lsplt/licenses/docs/doxygen-awesome-css/LICENSE",
+    "bytes": 1065,
+    "sha256": "a848f4935f110d45ae18cc4149b9613776648c6dc5e596f247b501b3d2503134"
+  },
+  {
+    "upstream": "https://github.com/LSPosed/LSPlt",
+    "download": "https://codeload.github.com/LSPosed/LSPlt/tar.gz/cef80a97a73184b4def9b3e1148884365fc173fd",
+    "commit": "cef80a97a73184b4def9b3e1148884365fc173fd",
+    "ref": "native/src/external/lsplt @ e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__lsplt/source-cef80a97a73184b4def9b3e1148884365fc173fd.tar.gz",
+    "bytes": 453783,
+    "sha256": "5510e9ab7209e416aecd600bc88897e52f9278584de2e980769612a9354f703a"
+  },
+  {
+    "upstream": "https://github.com/lz4/lz4/blob/d44371841a2f1728a3f36839fd4b7e872d0927d3/LICENSE",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__lz4/licenses/LICENSE",
+    "bytes": 565,
+    "sha256": "2ba56d6195e9bb84500784a49099edae53eb103785b25928c194809dba5a025c"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__lz4/source-d44371841a2f1728a3f36839fd4b7e872d0927d3.tar.gz",
+    "path": "magisk/submodules/native__src__external__lz4/licenses/contrib/djgpp/LICENSE",
+    "bytes": 1292,
+    "sha256": "d011d1e02cb32b71c1ce2922ab41a2e2ad30f4ecf8de22c078d53618205abc05"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__lz4/source-d44371841a2f1728a3f36839fd4b7e872d0927d3.tar.gz",
+    "path": "magisk/submodules/native__src__external__lz4/licenses/examples/COPYING",
+    "bytes": 18092,
+    "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__lz4/source-d44371841a2f1728a3f36839fd4b7e872d0927d3.tar.gz",
+    "path": "magisk/submodules/native__src__external__lz4/licenses/lib/LICENSE",
+    "bytes": 1311,
+    "sha256": "d15d99c8dc6b0ec22174c0e563a95bc40f9363ca7f9d9d793bb5c5a8e8d0af71"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__lz4/source-d44371841a2f1728a3f36839fd4b7e872d0927d3.tar.gz",
+    "path": "magisk/submodules/native__src__external__lz4/licenses/programs/COPYING",
+    "bytes": 18092,
+    "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__lz4/source-d44371841a2f1728a3f36839fd4b7e872d0927d3.tar.gz",
+    "path": "magisk/submodules/native__src__external__lz4/licenses/tests/COPYING",
+    "bytes": 18092,
+    "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+  },
+  {
+    "upstream": "https://github.com/lz4/lz4",
+    "download": "https://codeload.github.com/lz4/lz4/tar.gz/d44371841a2f1728a3f36839fd4b7e872d0927d3",
+    "commit": "d44371841a2f1728a3f36839fd4b7e872d0927d3",
+    "ref": "native/src/external/lz4 @ e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__lz4/source-d44371841a2f1728a3f36839fd4b7e872d0927d3.tar.gz",
+    "bytes": 321362,
+    "sha256": "66284f90b96f932da8acf942ca9dee808d331a81fe14a2bfcf7f68e153e4d048"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/selinux/blob/be1b39a657fee7faacfae548b75cb53302043a01/LICENSE",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/LICENSE",
+    "bytes": 289,
+    "sha256": "44bdcd6907872cfa80e0fbcc9851d6bec707c91beb1de0b7347f131f5542f300"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/selinux/blob/be1b39a657fee7faacfae548b75cb53302043a01/NOTICE",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/NOTICE",
+    "bytes": 108629,
+    "sha256": "e796f9a21ce1d6751f6c84312f734565718590e99617c49726b6d18588a3db47"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/checkpolicy/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/dbus/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/gui/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/libselinux/LICENSE",
+    "bytes": 1034,
+    "sha256": "86657b4c0fe868d7cbd977cb04c63b6c667e08fa51595a7bc846ad4bed8fc364"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/libsemanage/LICENSE",
+    "bytes": 26432,
+    "sha256": "6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/libsepol/LICENSE",
+    "bytes": 26432,
+    "sha256": "6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/mcstrans/LICENSE",
+    "bytes": 17992,
+    "sha256": "32b1062f7da84967e7019d01ab805935caa7ab7321a7ced0e30ebe75e5df1670"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/policycoreutils/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/python/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/python/sepolgen/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/restorecond/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/sandbox/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/scripts/ci/LICENSE",
+    "bytes": 1023,
+    "sha256": "fd80a26fbb3f644af1fa994134446702932968519797227e07a1368dea80f0bc"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/secilc/LICENSE",
+    "bytes": 1738,
+    "sha256": "35ed6be85f9297b649835058413706ef415d4dd38e2a743026a951b9c284bed4"
+  },
+  {
+    "license": "original submodule license text",
+    "source_archive": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "path": "magisk/submodules/native__src__external__selinux/licenses/semodule-utils/LICENSE",
+    "bytes": 18009,
+    "sha256": "204d8eff92f95aac4df6c8122bc1505f468f3a901e5a4cc08940e0ede1938994"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/selinux",
+    "download": "https://codeload.github.com/topjohnwu/selinux/tar.gz/be1b39a657fee7faacfae548b75cb53302043a01",
+    "commit": "be1b39a657fee7faacfae548b75cb53302043a01",
+    "ref": "native/src/external/selinux @ e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__selinux/source-be1b39a657fee7faacfae548b75cb53302043a01.tar.gz",
+    "bytes": 6101677,
+    "sha256": "fe54e3f25bcc0dca0d3d8d89673718a49fadc1c8186c406df6dde22fe5bf9e7d"
+  },
+  {
+    "license": "per-file AOSP/BSD and other notices; retained verbatim",
+    "source_archive": "magisk/submodules/native__src__external__system_properties/source-b7c2088565fbe13d22fe074960332e89615bb4aa.tar.gz",
+    "path": "magisk/submodules/native__src__external__system_properties/licenses/SOURCE-HEADERS.txt",
+    "bytes": 34194,
+    "sha256": "b966bdc34fa30e3d8989bd168a0efe021aa87db015ab88588fc8b6bbd348df8f"
+  },
+  {
+    "upstream": "https://github.com/topjohnwu/system_properties",
+    "download": "https://codeload.github.com/topjohnwu/system_properties/tar.gz/b7c2088565fbe13d22fe074960332e89615bb4aa",
+    "commit": "b7c2088565fbe13d22fe074960332e89615bb4aa",
+    "ref": "native/src/external/system_properties @ e8a58776f1d7bdf852072ad0baa6eceb9a1e4aac",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "magisk/submodules/native__src__external__system_properties/source-b7c2088565fbe13d22fe074960332e89615bb4aa.tar.gz",
+    "bytes": 30853,
+    "sha256": "22d1467c5b57e3ce473e54d1efb5fdf8f7cd58b72319e539786470f3379d99d4"
+  },
+  {
+    "upstream": "https://github.com/RikkaApps/Shizuku/blob/2650830c5b099ae0dd34fedf614d4f592ca05d65/LICENSE",
+    "license": "Apache-2.0",
+    "path": "shizuku/licenses/LICENSE",
+    "bytes": 11357,
+    "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"
+  },
+  {
+    "upstream": "https://github.com/RikkaApps/Shizuku",
+    "download": "https://codeload.github.com/RikkaApps/Shizuku/tar.gz/2650830c5b099ae0dd34fedf614d4f592ca05d65",
+    "commit": "2650830c5b099ae0dd34fedf614d4f592ca05d65",
+    "ref": "v13.6.0",
+    "license": "Apache-2.0",
+    "path": "shizuku/source-2650830c5b099ae0dd34fedf614d4f592ca05d65.tar.gz",
+    "bytes": 360733,
+    "sha256": "af27193059cee0ab822c4a96e4155e17c1c66a1996d7aff6d7783118f63fe226"
+  },
+  {
+    "upstream": "https://github.com/RikkaApps/Shizuku-API/blob/510fc988c02c3475d8c25db170f96792f105bdf8/LICENSE",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "shizuku/submodules/api/licenses/LICENSE",
+    "bytes": 1062,
+    "sha256": "64870037f294b6f2b75c8ebe77cc0702acb3b64f86b4b0e58bf8558525303686"
+  },
+  {
+    "upstream": "https://github.com/RikkaApps/Shizuku-API",
+    "download": "https://codeload.github.com/RikkaApps/Shizuku-API/tar.gz/510fc988c02c3475d8c25db170f96792f105bdf8",
+    "commit": "510fc988c02c3475d8c25db170f96792f105bdf8",
+    "ref": "api @ 2650830c5b099ae0dd34fedf614d4f592ca05d65",
+    "license": "component-specific; original licenses retained in archive",
+    "path": "shizuku/submodules/api/source-510fc988c02c3475d8c25db170f96792f105bdf8.tar.gz",
+    "bytes": 100569,
+    "sha256": "34379e718bee98521d21d01e8320a6ea56b9296f9a6b8eb2cd4b27cd63784a91"
+  },
+  {
+    "upstream": "https://github.com/Mystery00/TurboIMS/tree/8c52b0d2b862bea21373355971b3fa7235a183c6",
+    "download": "https://github.com/Pixel-Tailor-CN/TensorIMS/releases/download/3.7.3.r126.8c52b0d2/TurbolIms.apk",
+    "license": "Apache-2.0",
+    "upstream_sha256": "19a8ab1d4d2f865faa94cd8622a139f8a99a6880b6969ef52deb268781af6d52",
+    "path": "turbo-ims/TurbolIms-3.7.3.apk",
+    "bytes": 2530009,
+    "sha256": "19a8ab1d4d2f865faa94cd8622a139f8a99a6880b6969ef52deb268781af6d52"
+  },
+  {
+    "upstream": "https://github.com/Mystery00/TurboIMS/blob/8c52b0d2b862bea21373355971b3fa7235a183c6/LICENSE",
+    "license": "Apache-2.0",
+    "path": "turbo-ims/licenses/LICENSE",
+    "bytes": 11357,
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  {
+    "upstream": "https://github.com/Mystery00/TurboIMS",
+    "download": "https://codeload.github.com/Mystery00/TurboIMS/tar.gz/8c52b0d2b862bea21373355971b3fa7235a183c6",
+    "commit": "8c52b0d2b862bea21373355971b3fa7235a183c6",
+    "ref": "3.7.3.r126.8c52b0d2",
+    "license": "Apache-2.0",
+    "path": "turbo-ims/source-8c52b0d2b862bea21373355971b3fa7235a183c6.tar.gz",
+    "bytes": 466711,
+    "sha256": "4f680bc6ccfb01890ad0572135d275457fbbdfea0ce795b63bac1de1353805d7"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP",
+    "upstream_commit": "0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "license": "GPLv3",
+    "role": "VoDog research fork",
+    "path": "vodog-research-fork/LICENSE",
+    "bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP",
+    "upstream_commit": "0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "license": "GPLv3",
+    "role": "VoDog research fork",
+    "path": "vodog-research-fork/PROVENANCE.md",
+    "bytes": 595,
+    "sha256": "566e2aa090fac2a9f4b55dbf1cb1c8a84d78bb13ee0008ba9f8ba6e52da8b23c"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP",
+    "upstream_commit": "0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "license": "GPLv3",
+    "role": "VoDog research fork",
+    "path": "vodog-research-fork/source-files.json",
+    "bytes": 8431,
+    "sha256": "f1cdbe0c126d8913a0064931bbd75b46b98bd145257d844be7c8f03289d02a19"
+  },
+  {
+    "upstream": "https://github.com/chenxiaolong/BCP",
+    "upstream_commit": "0350949cc1a8b83bebc725cf25256b259c61edf9",
+    "license": "GPLv3",
+    "role": "VoDog research fork",
+    "path": "vodog-research-fork/source-vodog-research.tar.gz",
+    "bytes": 252672,
+    "sha256": "203cca5184a3eae2ed379b88171ca74c88ec0b049fa257222414b9985bf0bda3"
+  },
+  {
+    "upstream": "https://github.com/GetStream/webrtc-android/blob/859dd09c96f6053ea26eca432240eeff532a062f/LICENSE",
+    "license": "Apache-2.0; native WebRTC BSD and third-party licenses",
+    "path": "webrtc-android/licenses/LICENSE",
+    "bytes": 11357,
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  {
+    "upstream": "https://github.com/GetStream/webrtc-android",
+    "download": "https://codeload.github.com/GetStream/webrtc-android/tar.gz/859dd09c96f6053ea26eca432240eeff532a062f",
+    "commit": "859dd09c96f6053ea26eca432240eeff532a062f",
+    "ref": "1.3.9",
+    "license": "Apache-2.0; native WebRTC BSD and third-party licenses",
+    "upstream_archive_sha256": "35a7d330229f718f9a8b3f928a0259b399773edfe130e357fc3f5fb6687e0392",
+    "omitted": [
+      {
+        "path": "webrtc-android-859dd09c96f6053ea26eca432240eeff532a062f/stream-webrtc-android/libs/arm64-v8a/libjingle_peerconnection_so.so",
+        "sha256": "4e9d2df81f7db6d184a9d0024e6f9825c6325c3ee54a8d61ef657f02ef8d85e7"
+      },
+      {
+        "path": "webrtc-android-859dd09c96f6053ea26eca432240eeff532a062f/stream-webrtc-android/libs/armeabi-v7a/libjingle_peerconnection_so.so",
+        "sha256": "5c4e33201809f56eb41ead202000f7ba8afa0a87ce159af96d18d940622c5c78"
+      },
+      {
+        "path": "webrtc-android-859dd09c96f6053ea26eca432240eeff532a062f/stream-webrtc-android/libs/x86/libjingle_peerconnection_so.so",
+        "sha256": "2e3e1e743682038363bca30aeb2e09230883aba653e3e411c9a7f7cc85516ddb"
+      },
+      {
+        "path": "webrtc-android-859dd09c96f6053ea26eca432240eeff532a062f/stream-webrtc-android/libs/x86_64/libjingle_peerconnection_so.so",
+        "sha256": "36272820d42b34f29fed7a11a4eecccedee3bfe86c45f280e0be5c5b246f133d"
+      }
+    ],
+    "transformation": "Removed four prebuilt .so libraries pending complete native dependency notices. All source/build files unchanged.",
+    "path": "webrtc-android/source-only-859dd09c96f6053ea26eca432240eeff532a062f.tar.gz",
+    "bytes": 664913,
+    "sha256": "1451fc7cc1f4372b45a8afcc1ed071fa3cc633ba44119b701f31d40e221bd3c8"
+  },
+  {
+    "upstream": "https://github.com/GetStream/webrtc/blob/4655e557d1206a42899b6b03fbf017fc64c654cc/LICENSE",
+    "license": "BSD-3-Clause plus retained third-party licenses",
+    "path": "webrtc-native/licenses/LICENSE",
+    "bytes": 1511,
+    "sha256": "ab00a482b6a3902e40211b43c5d0441962ea99b6cc7c25c0f243fa270b78d482"
+  },
+  {
+    "upstream": "https://github.com/GetStream/webrtc/blob/4655e557d1206a42899b6b03fbf017fc64c654cc/NOTICE",
+    "license": "BSD-3-Clause plus retained third-party licenses",
+    "path": "webrtc-native/licenses/NOTICE",
+    "bytes": 1130,
+    "sha256": "bbb552de7d714ac2b6edb539fcac921e2d2f4b92e41d20415464917542c4b87c"
+  },
+  {
+    "upstream": "https://github.com/GetStream/webrtc/blob/4655e557d1206a42899b6b03fbf017fc64c654cc/PATENTS",
+    "license": "BSD-3-Clause plus retained third-party licenses",
+    "path": "webrtc-native/licenses/PATENTS",
+    "bytes": 1388,
+    "sha256": "01462e2068d1a04c2274f3389773014c14ed9bc3446b28303543bd3e3c064145"
+  },
+  {
+    "upstream": "https://github.com/GetStream/webrtc/blob/4655e557d1206a42899b6b03fbf017fc64c654cc/license_template.txt",
+    "license": "BSD-3-Clause plus retained third-party licenses",
+    "path": "webrtc-native/licenses/license_template.txt",
+    "bytes": 410,
+    "sha256": "1f7a086c17fa2bdbe27d3eb6424a64b9bea9d7db89a4e220fef52ca24addb9e9"
+  },
+  {
+    "upstream": "https://github.com/GetStream/webrtc",
+    "download": "https://codeload.github.com/GetStream/webrtc/tar.gz/4655e557d1206a42899b6b03fbf017fc64c654cc",
+    "commit": "4655e557d1206a42899b6b03fbf017fc64c654cc",
+    "ref": "m125.4",
+    "license": "BSD-3-Clause plus retained third-party licenses",
+    "path": "webrtc-native/source-4655e557d1206a42899b6b03fbf017fc64c654cc.tar.gz",
+    "bytes": 39821783,
+    "sha256": "a299acf51719ad971fe0aec31a5e709778c882423c358f9d4de5a8803b6a7032"
+  }
+]

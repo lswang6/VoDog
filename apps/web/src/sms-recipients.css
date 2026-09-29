@@ -1,0 +1,42 @@
+.sms-recipients { min-width: 0; padding: 12px 16px; }
+.sms-recipient-heading, .sms-recipient-picker header, .sms-recipient-manual { display: flex; align-items: center; gap: 8px; }
+.sms-recipient-heading, .sms-recipient-picker header { justify-content: space-between; }
+.sms-recipient-add, .sms-recipient-chips button { appearance: none; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; flex-shrink: 0; padding: 0; border: 1px solid transparent; line-height: 1; cursor: pointer; }
+.sms-recipient-chips button { border-radius: 999px; background: transparent; color: var(--subtle); font-size: 20px; }
+.sms-recipient-chips button:hover:not(:disabled) { background: var(--surface); color: var(--ink); }
+.sms-recipient-add:hover:not(:disabled) { border-color: var(--blue); }
+.sms-recipient-add:disabled, .sms-recipient-chips button:disabled { opacity: .45; cursor: not-allowed; }
+.sms-recipient-add:disabled:active, .sms-recipient-chips button:disabled:active { scale: 1; }
+.sms-recipient-add { border-radius: 14px; background: var(--blue-soft); font-size: 24px; color: var(--blue); }
+.sms-recipient-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 8px 0; list-style: none; }
+.sms-recipient-chips li { display: flex; align-items: center; max-width: 100%; padding-left: 12px; border-radius: 16px; background: var(--blue-soft); }
+.sms-recipient-chips li > span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.sms-recipient-chips li > span > span { font-variant-numeric: tabular-nums; }
+.sms-recipient-manual input { min-width: 0; flex: 1; }
+.sms-recipient-overlay { position: fixed; inset: 0; z-index: 100; padding: 16px; display: grid; place-items: center; background: rgb(0 0 0 / .35); }
+.sms-recipient-picker { width: min(100%, 440px); max-height: min(640px, 85dvh); display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 20px; background: var(--surface); color: var(--ink); box-shadow: 0 8px 32px rgb(0 0 0 / .2); }
+.sms-recipient-picker h3, .sms-recipient-picker p { margin: 0; }
+.sms-recipient-picker button, .sms-recipient-picker input[type=search] { min-height: 44px; }
+.sms-recipient-results { overflow: auto; min-height: 0; }
+.sms-recipient-results fieldset { border: 0; padding: 8px 0; margin: 0; }
+.sms-recipient-results legend { font-weight: 600; overflow-wrap: anywhere; }
+.sms-recipient-results label { display: flex; align-items: center; gap: 12px; min-height: 44px; overflow-wrap: anywhere; }
+.sms-recipient-results input[type=checkbox] { width: 20px; height: 20px; flex: 0 0 20px; }
+/* All recipient text actions share explicit surfaces; none use browser button defaults. */
+.sms-recipient-manual > button, .sms-recipient-picker button { appearance: none; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 8px 14px; border: 1px solid transparent; border-radius: 12px; background: var(--blue-soft); color: var(--blue); font: inherit; font-weight: 500; line-height: 1.25; cursor: pointer; }
+.sms-recipient-manual > button { flex-shrink: 0; }
+.sms-recipient-picker header { flex-wrap: wrap; margin: 0; }
+.sms-recipient-picker header > div { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.sms-recipient-picker header > div > button:first-child { background: transparent; color: var(--subtle); }
+.sms-recipient-picker header > div > button:last-child { background: var(--blue); color: var(--surface); font-weight: 600; }
+.sms-recipient-manual > button:hover:not(:disabled), .sms-recipient-picker button:hover:not(:disabled) { border-color: var(--blue); }
+.sms-recipient-picker header > div > button:first-child:hover:not(:disabled) { background: var(--blue-soft); color: var(--blue); border-color: transparent; }
+.sms-recipient-picker header > div > button:last-child:hover:not(:disabled) { opacity: .9; }
+.sms-recipient-picker > p > button { margin: 8px 0 0 8px; }
+.sms-recipient-results > button { width: 100%; margin-top: 12px; }
+.sms-recipient-manual > button:disabled, .sms-recipient-picker button:disabled { opacity: .45; cursor: not-allowed; }
+.sms-recipient-manual > button:disabled:active, .sms-recipient-picker button:disabled:active { scale: 1; }
+.sms-recipient-results input[type=checkbox] { accent-color: var(--blue); }
+.sms-recipients button:focus-visible, .sms-recipient-picker :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.sms-recipients button:active { scale: .96; }
+@media (prefers-reduced-motion: reduce) { .sms-recipients button:active { scale: 1; } }

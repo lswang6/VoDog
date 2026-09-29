@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>人机验证</title>
+<style>
+ :root{color-scheme:light dark}
+ body{margin:0;min-height:100dvh;display:flex;align-items:center;justify-content:center;background:transparent;
+   font:15px -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;color:#17243b}
+ @media(prefers-color-scheme:dark){body{color:#eef2f8}}
+ #widget{display:flex;justify-content:center;min-height:70px;width:100%}
+ .status{text-align:center;padding:12px;font-size:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="widget"></div>
+<script>
+/**
+ * Turnstile host page for the native clients.
+ *
+ * iOS and Android wrap this page in a WebView because Cloudflare validates the widget hostname; the site key is
+ * passed in by the app (it is public data returned by GET /api/v1/auth/config). The token is handed back through
+ * the platform bridges, with the document title as a platform-independent fallback.
+ */
+function post(message){
+  const payload=JSON.stringify(message);
+  try{if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.turnstile)window.webkit.messageHandlers.turnstile.postMessage(payload);}catch(error){}
+  try{if(window.TurnstileBridge&&window.TurnstileBridge.postMessage)window.TurnstileBridge.postMessage(payload);}catch(error){}
+  if(typeof window.__turnstileCallback==='function'){try{window.__turnstileCallback(payload);}catch(error){}}
+}
+function setTitle(value){try{document.title=value;}catch(error){}}
+function fail(text){document.getElementById('widget').innerHTML='<p class="status">'+text+'</p>';setTitle('turnstile:error');post({type:'error',message:text});}
+(function(){
+  const params=new URLSearchParams(location.search);
+  const siteKey=(params.get('sitekey')||'').trim();
+  const language=(params.get('lang')||'zh-cn').trim();
+  if(!siteKey){fail('缺少人机验证站点密钥。');return;}
+  const script=document.createElement('script');
+  script.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+  script.async=true;script.defer=true;
+  script.onerror=function(){fail('人机验证组件加载失败，请检查网络。');};
+  script.onload=function(){
+    if(!window.turnstile){fail('人机验证组件不可用。');return;}
+    window.turnstile.render(document.getElementById('widget'),{
+      sitekey:siteKey,theme:'auto',language:language,size:'flexible',
+      callback:function(token){setTitle('turnstile:token');post({type:'token',token:token});},
+      'error-callback':function(){setTitle('turnstile:error');post({type:'error',message:'人机验证失败，请重试。'});},
+      'expired-callback':function(){setTitle('turnstile:expired');post({type:'expired'});},
+      'timeout-callback':function(){setTitle('turnstile:expired');post({type:'expired'});}
+    });
+  };
+  document.head.appendChild(script);
+})();
+</script>
+</body>
+</html>

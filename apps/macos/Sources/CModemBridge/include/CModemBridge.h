@@ -1,0 +1,198 @@
+#ifndef C_MODEM_BRIDGE_H
+#define C_MODEM_BRIDGE_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct VoDogModem VoDogModem;
+typedef struct VoDogVoice VoDogVoice;
+
+typedef struct VoDogModemDevice {
+    uint16_t vendor_id;
+    uint16_t product_id;
+    uint32_t location_id;
+    uint64_t registry_id;
+} VoDogModemDevice;
+typedef void (*VoDogModemStreamCallback)(
+    void *context,
+    const uint8_t *bytes,
+    size_t length
+);
+
+enum {
+    VODOG_MODEM_OK = 0,
+    VODOG_MODEM_NOT_FOUND = 1,
+    VODOG_MODEM_NOT_OPEN = 2,
+    VODOG_MODEM_BUFFER_TOO_SMALL = 3
+};
+
+VoDogModem *celldock_modem_create(void);
+void celldock_modem_destroy(VoDogModem *modem);
+
+/*
+ * Copies every supported physical USB modem currently present in IOKit.
+ * The return value is the total number found, which may exceed capacity.
+ * Passing NULL with capacity 0 performs a count-only scan.
+ */
+size_t celldock_modem_copy_devices(VoDogModemDevice *devices, size_t capacity);
+
+/*
+ * Opens only IOUSBHostInterface 2, never the parent device or ECM interface,
+ * and establishes a quiet AT protocol boundary before returning.
+ */
+int celldock_modem_open(VoDogModem *modem);
+int celldock_modem_open_for_location(VoDogModem *modem, uint32_t location_id);
+void celldock_modem_close(VoDogModem *modem);
+int celldock_modem_is_open(const VoDogModem *modem);
+
+/*
+ * Aborts only a pending unsolicited-event/resynchronization read, without
+ * resetting or closing the USB interface. Command and SMS response reads are
+ * never interrupted. Calling this with no interruptible read is a safe no-op.
+ */
+int celldock_modem_interrupt_read(VoDogModem *modem);
+
+uint16_t celldock_modem_vendor_id(const VoDogModem *modem);
+uint16_t celldock_modem_product_id(const VoDogModem *modem);
+uint32_t celldock_modem_location_id(const VoDogModem *modem);
+uint64_t celldock_modem_registry_id(const VoDogModem *modem);
+uint8_t celldock_modem_input_endpoint(const VoDogModem *modem);
+uint8_t celldock_modem_output_endpoint(const VoDogModem *modem);
+void celldock_modem_set_stream_callback(
+    VoDogModem *modem,
+    VoDogModemStreamCallback callback,
+    void *context
+);
+
+/*
+ * Sends one ASCII AT command and waits for OK/ERROR. The response is always
+ * NUL-terminated when output_capacity is greater than zero. A timeout,
+ * transport error, or malformed/oversized response closes the AT interface;
+ * callers must reopen it before issuing another command.
+ */
+int celldock_modem_command(
+    VoDogModem *modem,
+    const char *command,
+    int timeout_ms,
+    char *output,
+    size_t output_capacity
+);
+
+/* Dial/answer commands may finish with a call result instead of OK/ERROR. */
+int celldock_modem_call_command(
+    VoDogModem *modem,
+    const char *command,
+    int timeout_ms,
+    char *output,
+    size_t output_capacity
+);
+
+/*
+ * Submits one SMS-SUBMIT PDU using the two-stage AT+CMGS prompt protocol.
+ * pdu must contain ASCII hexadecimal digits including the SMSC length octet;
+ * tpdu_length excludes that SMSC field, as required by AT+CMGS.
+ *
+ * The payload is never written unless a '>' prompt is observed. After the
+ * payload and Ctrl-Z are written, a timeout is intentionally ambiguous and
+ * closes the interface so callers cannot accidentally retry the same SMS.
+ */
+int celldock_modem_send_sms_pdu(
+    VoDogModem *modem,
+    const char *pdu,
+    size_t tpdu_length,
+    int timeout_ms,
+    char *output,
+    size_t output_capacity
+);
+
+/*
+ * Reads already pending unsolicited bytes. Timeout is intentionally short.
+ * Bytes observed while establishing a quiet protocol boundary are returned
+ * here before new USB reads, so resynchronization cannot swallow URCs. A
+ * non-timeout transport/protocol error closes the AT interface.
+ */
+int celldock_modem_read(
+    VoDogModem *modem,
+    int timeout_ms,
+    char *output,
+    size_t output_capacity
+);
+
+const char *celldock_modem_last_error(const VoDogModem *modem);
+
+/*
+ * Raw voice-over-USB transport for QPCMV option 0. This opens only USB
+ * interface 1 (the NMEA/PCM port); it never opens or resets the parent USB
+ * device and therefore can run alongside the AT and CDC-ECM interfaces.
+ */
+VoDogVoice *celldock_voice_create(void);
+void celldock_voice_destroy(VoDogVoice *voice);
+int celldock_voice_open(VoDogVoice *voice);
+int celldock_voice_open_for_location(VoDogVoice *voice, uint32_t location_id);
+int celldock_voice_open_interface(VoDogVoice *voice, uint8_t interface_number);
+int celldock_voice_open_interface_for_location(
+    VoDogVoice *voice,
+    uint32_t location_id,
+    uint8_t interface_number
+);
+/*
+ * Opens a specific control interface and, if another user-space client owns
+ * it, asks IOKit to transfer exclusive access. Intended for the module's ADB
+ * interface only; AT, ECM and audio callers should keep using normal opens.
+ */
+int celldock_voice_open_control_interface_for_location(
+    VoDogVoice *voice,
+    uint32_t location_id,
+    uint8_t interface_number
+);
+
+/*
+ * Reads the process owner recorded by IOUSBHostInterface as
+ * "pid <number>, <name>". Returns 1 when a process owner is present, otherwise
+ * zero. This does not open, close, seize, or otherwise mutate the interface.
+ */
+int celldock_usb_interface_owner_process(
+    uint32_t location_id,
+    uint8_t interface_number,
+    int32_t *process_id,
+    char *process_name,
+    size_t process_name_capacity
+);
+void celldock_voice_close(VoDogVoice *voice);
+int celldock_voice_is_open(const VoDogVoice *voice);
+
+uint8_t celldock_voice_input_endpoint(const VoDogVoice *voice);
+uint8_t celldock_voice_output_endpoint(const VoDogVoice *voice);
+
+/* Clears a recoverable USB endpoint halt without resetting the device. */
+int celldock_voice_clear_stalls(VoDogVoice *voice);
+
+/*
+ * A successful read returns the number of PCM bytes received; a timeout
+ * returns zero. Writes return VODOG_MODEM_OK on success. Any other return value
+ * is an IOKit/bridge error and closes the voice interface.
+ */
+int celldock_voice_read(
+    VoDogVoice *voice,
+    int timeout_ms,
+    uint8_t *output,
+    size_t output_capacity
+);
+int celldock_voice_write(
+    VoDogVoice *voice,
+    int timeout_ms,
+    const uint8_t *bytes,
+    size_t length
+);
+
+const char *celldock_voice_last_error(const VoDogVoice *voice);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

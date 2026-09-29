@@ -1,0 +1,4 @@
+module CUACProbe {
+    header "../Sources/CUACProbe/include/CUACProbe.h"
+    export *
+}

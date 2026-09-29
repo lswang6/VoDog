@@ -1,0 +1,29 @@
+name: Source checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publication:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/check-publication.py --self-test
+      - run: python3 tools/check-publication.py
+      - run: python3 tools/check-docs.py
+      - run: shasum -a 256 -c SHA256SUMS
+        working-directory: infra/pixel/external
+      - run: python3 infra/test_prepare.py
+  containers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [control, media, voice, web, turn]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build standalone Linux image
+        run: docker build --file infra/Dockerfile --target "${{ matrix.target }}" --tag "vodog-${{ matrix.target }}:check" .

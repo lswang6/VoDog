@@ -1,0 +1,69 @@
+name: VoDog
+options:
+  bundleIdPrefix: org.vodog
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    VODOG_DOMAIN: vodog.example.com
+    CODE_SIGN_STYLE: Automatic
+packages:
+  LiveKitWebRTC:
+    url: https://github.com/livekit/webrtc-xcframework
+    exactVersion: 150.7871.01
+targets:
+  VoDog:
+    type: application
+    platform: iOS
+    sources: [VoDog]
+    dependencies:
+      - package: LiveKitWebRTC
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.vodog
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_FILE: VoDog/Info.plist
+    entitlements:
+      path: VoDog/VoDog.entitlements
+      properties:
+        com.apple.developer.associated-domains:
+          - webcredentials:$(VODOG_DOMAIN)
+        aps-environment: development
+  VoDogTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [VoDogTests]
+    dependencies:
+      - target: VoDog
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.vodog.tests
+        GENERATE_INFOPLIST_FILE: YES
+  VoDogUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [VoDogUITests]
+    dependencies:
+      - target: VoDog
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.vodog.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  VoDog:
+    build:
+      targets:
+        VoDog: all
+        VoDogTests: [test]
+    test:
+      targets: [VoDogTests, VoDogUITests]
+      environmentVariables:
+        TEST_USERNAME_B64: $(VODOG_UI_TEST_USERNAME_B64)
+        TEST_PASSWORD_B64: $(VODOG_UI_TEST_PASSWORD_B64)
+        VODOG_UI_TEST_REAL_BACKEND: $(VODOG_UI_TEST_REAL_BACKEND)
+        VODOG_UI_TEST_API_BASE_URL: $(VODOG_UI_TEST_API_BASE_URL)
+        VODOG_UI_TEST_FIXTURE_KEY: $(VODOG_UI_TEST_FIXTURE_KEY)
+        VODOG_UI_TEST_SHARED_JOURNEY: $(VODOG_UI_TEST_SHARED_JOURNEY)
+        VODOG_UI_TEST_WEB_HANDOFF_PATH: $(VODOG_UI_TEST_WEB_HANDOFF_PATH)

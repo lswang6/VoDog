@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>VoDog</title>
+  <desc>A friendly white dog with a mint telephone collar on a dark teal background.</desc>
+  <rect width="1024" height="1024" fill="#103D3B"/>
+  <path d="M310 292C256 250 184 275 173 348L154 498C146 557 179 597 220 587L318 503Z" fill="#58D6B1"/>
+  <path d="M714 292C768 250 840 275 851 348L870 498C878 557 845 597 804 587L706 503Z" fill="#58D6B1"/>
+  <path d="M512 246C362 246 278 332 278 492V558C278 684 380 769 512 769S746 684 746 558V492C746 332 662 246 512 246Z" fill="#F4FAF5"/>
+  <ellipse cx="409" cy="463" rx="26" ry="34" fill="#103D3B"/>
+  <ellipse cx="615" cy="463" rx="26" ry="34" fill="#103D3B"/>
+  <path d="M469 543Q512 522 555 543Q559 573 512 596Q465 573 469 543Z" fill="#103D3B"/>
+  <path d="M512 593V612M512 612Q477 653 444 622M512 612Q547 653 580 622" fill="none" stroke="#103D3B" stroke-width="19" stroke-linecap="round"/>
+  <rect x="374" y="728" width="276" height="68" rx="34" fill="#58D6B1"/>
+  <path d="M463 743L477 735Q483 732 489 739L502 754Q507 761 501 767L493 775Q511 793 529 775L537 767Q543 761 550 766L565 779Q572 785 569 791L561 805Q553 817 537 814Q481 803 460 758Q456 749 463 743Z" fill="#103D3B" transform="translate(0 -11)"/>
+</svg>
