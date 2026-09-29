@@ -1,6 +1,6 @@
 # 硬件要求
 
-**未附语音载荷：**兼容 QDC507 内核模块及已编译 PCM 载荷已排除，准备 USB 身份本身不足以获得语音。见 [DJI 设置](dji-setup.zh-CN.md)及运行时要求。
+**已附语音载荷：**现已原样包含 CellDock 公开 QDC507 内核模块与已编译 PCM bridge。仍需内核 3.18.44、兼容 ABI、root ADB 和 UAC。准备 USB 身份或初始化成功不足以证明语音可用；保留检查失败时的就绪阻断，真机验收仍待完成。见 [DJI 设置](dji-setup.zh-CN.md)及[运行时来源与限制](../apps/macos/module/RUNTIME.md)。
 
 [文档目录](README.zh-CN.md) · [English](hardware.md)
 

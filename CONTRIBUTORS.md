@@ -21,8 +21,12 @@ VoDog thanks its [direct contributors](https://github.com/lswang6/VoDog/graphs/c
 | [coturn](https://github.com/coturn/coturn) | [coturn contributors](https://github.com/coturn/coturn/graphs/contributors) | TURN relay / TURN 中继 |
 | [lpac](https://github.com/estkme-group/lpac) / [cJSON](https://github.com/DaveGamble/cJSON) | ESTKme GROUP, [lpac contributors](https://github.com/estkme-group/lpac/graphs/contributors), Dave Gamble and [cJSON contributors](https://github.com/DaveGamble/cJSON/graphs/contributors) | Vendored euicc/cJSON subset / eSIM 库子集及 JSON 实现 |
 | [vowifi-go](https://github.com/boa-z/vowifi-go) | [boa-z](https://github.com/boa-z) and [contributors](https://github.com/boa-z/vowifi-go/graphs/contributors) | Separate modified VoWiFi runtime / 独立修改版 VoWiFi 运行时 |
-| [Quectel kernel tree](https://github.com/the-modem-distro/quectel_eg25_kernel) | the-modem-distro and upstream Linux/Quectel authors | Provenance reference for excluded kernel modules, not a claim of complete corresponding source / 已排除内核模块的来源参考，不代表已包含完整对应源码 |
+| [Quectel kernel tree](https://github.com/the-modem-distro/quectel_eg25_kernel) | the-modem-distro and upstream Linux/Quectel authors | Provenance reference for bundled kernel modules; exact corresponding source/configuration/patches remain unavailable / 已随附内核模块的来源参考，精确对应源码、配置及补丁仍未取得 |
 
 The macOS [third-party notices](apps/macos/docs/THIRD_PARTY_NOTICES.md) additionally credit protocol references: IchthysMaranatha/asterisk-chan-quectel, Quectel documentation, warthog618/sms, patriczeq/WWANManager, and Blue Robotics/cellphone-modem-manager. These are references, not a claim that their code was copied.
 
 另感谢 [React](https://github.com/facebook/react)、[Vite](https://github.com/vitejs/vite)、[Fastify](https://github.com/fastify/fastify)、[TypeScript](https://github.com/microsoft/TypeScript)、[Node.js](https://github.com/nodejs/node)、[PostgreSQL](https://www.postgresql.org/)、[Kotlin](https://github.com/JetBrains/kotlin)、[AndroidX](https://android.googlesource.com/platform/frameworks/support/)、[Swift](https://github.com/swiftlang/swift) 与 [FFmpeg](https://ffmpeg.org/) 的作者和贡献者。依赖锁文件、Pixel [来源清单](infra/pixel/external/manifest.json) 及各组件原始声明记录准确版本和许可；此页不穷举所有传递依赖。
+
+The runtime binaries are included unchanged from public CellDock commit `6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c`; see [runtime provenance](apps/macos/module/RUNTIME.md). GPL-2.0 kernel-module and CellDock noncommercial terms remain applicable. Bundling does not establish complete or reproducible kernel source or resolved redistribution obligations.
+
+运行时二进制原样来自上述 CellDock 公开提交；内核模块的 GPL-2.0 与 CellDock 非商业条款仍适用。随附不代表内核源码完整、可重复构建或再分发义务已解决。

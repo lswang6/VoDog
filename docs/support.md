@@ -1,6 +1,6 @@
 # Support and acceptance boundaries
 
-**DJI voice prerequisite:** the optional kernel/PCM payload is excluded from this export. Source support in this table does not mean a fresh module can provide audio. See [DJI setup](dji-setup.md).
+**DJI voice prerequisite:** the public CellDock kernel/PCM runtime binaries are now bundled. Kernel 3.18.44 with a compatible ABI, root ADB and USB Audio Class (UAC) remain required; initialization alone does not establish working audio. Hardware acceptance is still pending. See [DJI setup](dji-setup.md) and [runtime provenance and limits](../apps/macos/module/RUNTIME.md).
 
 [Documentation](README.md) · [简体中文](support.zh-CN.md)
 
@@ -33,4 +33,4 @@ Record these separately: source review; reproducible build; unit/integration tes
 
 [Release preparation checks](release-checks.md) record the public export validation scope separately from new installation acceptance.
 
-The excluded DJI runtime also affects helper-backed module control and credential transport, not only audio. A payload-free Mac build supports the remote client path but must not be described as a working module gateway.
+The bundled DJI runtime also supports helper-backed module control and credential transport, not only audio. Preserve fail-closed compatibility and integrity checks: missing, incompatible or invalid payloads must block gateway acceptance. Bundling does not establish physical module readiness.

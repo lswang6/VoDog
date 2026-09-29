@@ -1,6 +1,6 @@
 # 支持范围与验收边界
 
-**DJI 语音前提：**本发行不带可选内核/PCM 载荷，表中源码支持不表示全新模组可直接提供音频。见 [DJI 设置](dji-setup.zh-CN.md)。
+**DJI 语音前提：**现已随附 CellDock 公开内核/PCM 运行时二进制。仍需内核 3.18.44、兼容 ABI、root ADB 和 USB Audio Class（UAC）；初始化成功不等于音频可用，真机验收尚未完成。见 [DJI 设置](dji-setup.zh-CN.md)及[运行时来源与限制](../apps/macos/module/RUNTIME.md)。
 
 [文档目录](README.zh-CN.md) · [English](support.md)
 
@@ -33,4 +33,4 @@ macOS 源码基于 CellDock，许可不同。本机模组功能与 VoDog 远程�
 
 [发行准备检查](release-checks.md)单独记录公开导出验证范围，不替代全新安装验收。
 
-排除的 DJI 运行时还影响经 helper 的模组控制与凭据传输，不仅是音频。不带载荷的 Mac 构建可以支持远程客户端路径，但不能描述为可用模组网关。
+随附的 DJI 运行时还支持经 helper 的模组控制与凭据传输，不仅是音频。保留兼容性与完整性检查，检查失败时保持阻断：缺失、不兼容或无效载荷不能通过网关验收。随附二进制不等于实际模组已就绪。

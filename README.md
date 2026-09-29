@@ -1,6 +1,6 @@
 # VoDog
 
-![VoDog](assets/brand/vodog.png)
+![VoDog: remote SIM calls, SMS, multiple numbers, AI answering, recording sync and transcription](assets/illustrations/vodog-feature-hero.png)
 
 **Your SIM, across your devices.**
 
@@ -29,7 +29,7 @@ These are source capabilities, not a claim that a fresh VoDog installation has p
 The Pixel implementation is based on the Pixel 7 Pro integration. Other Pixels, Android builds, carrier variants, and unrelated LTE dongles are **not automatically supported**. The DJI path is not a general promise of support for every DJI product. Read [hardware requirements](docs/hardware.md) before choosing equipment.
 
 
-DJI local/gateway voice requires a separately acquired and validated compatible runtime; kernel binaries without exact corresponding source are excluded from this export. See [DJI setup](docs/dji-setup.md).
+The required DJI runtime binaries and upstream manifest are bundled and packaged by default; compatible hardware/firmware still needs validation. Exact corresponding kernel build sources remain incomplete. See [DJI setup](docs/dji-setup.md).
 
 ## How it fits together
 
@@ -87,7 +87,7 @@ These screens use synthetic demo data, not real calls or accounts, and do not es
 
 **VoDog is a mixed-license source distribution.** First-party VoDog code is licensed under **AGPL-3.0-only**, subject to the root license and file-level notices. Third-party code keeps its own license. In particular, **CellDock-derived macOS code retains its custom non-commercial license**: it permits copying, modification, and distribution with attribution, and excludes business use. The root AGPL license does not override that restriction.
 
-The macOS component is source-available under noncommercial terms. Its optional voice kernel binaries are excluded because exact corresponding source/build inputs are unavailable. See [licensing and attribution](docs/licensing.md) for component-specific terms.
+The macOS component is source-available under noncommercial terms. Its required voice runtime binaries are archived from pinned CellDock upstream; exact corresponding kernel source/build inputs remain unavailable. See [licensing and attribution](docs/licensing.md) for component-specific terms.
 
 [Pixel setup walkthrough](docs/pixel-setup.md) · [DJI setup walkthrough](docs/dji-setup.md) · [Host installer](infra/README.md)
 

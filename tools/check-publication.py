@@ -65,6 +65,15 @@ def main():
             component = component_root / entry['path']
             if not component.is_file() or hashlib.sha256(component.read_bytes()).hexdigest() != entry['sha256']:
                 failures.append((str(component.relative_to(ROOT)), 'component checksum mismatch'))
+    runtime_root = ROOT / 'apps/macos/Resources/ModuleVoice'
+    runtime_manifest = json.loads((runtime_root / 'manifest.json').read_text())
+    reference = json.loads((ROOT / 'apps/macos/module/runtime-manifest.example.json').read_text())
+    if runtime_manifest != reference:
+        failures.append((str(runtime_root.relative_to(ROOT)), 'runtime manifest differs from pinned reference'))
+    for entry in runtime_manifest['files']:
+        component = runtime_root / entry['name']
+        if not component.is_file() or component.stat().st_size != entry['size'] or hashlib.sha256(component.read_bytes()).hexdigest() != entry['sha256']:
+            failures.append((str(component.relative_to(ROOT)), 'runtime size/checksum mismatch'))
     for name, reason in failures:
         print(f'{name}: {reason}')
     print(f'Publication guard: {len(set(filter(None, paths)))} files, {len(failures)} findings')

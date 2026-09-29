@@ -4,9 +4,22 @@
 
 ## What is available
 
-The integration targets **DJI QDC507 / Quectel EG25-G** on Apple-silicon macOS. Remote VoDog client features are buildable independently of module audio. This source export **does not include the QDC507 kernel modules or compiled module-side PCM payload** needed to initialize local/gateway voice. Exact corresponding source/build inputs for the kernel blobs were unavailable, so they are excluded; this is not a proprietary-license exception. Read the [runtime requirements and acquisition/build procedure](../apps/macos/module/RUNTIME.md).
+The integration targets **DJI QDC507 / Quectel EG25-G** on Apple-silicon macOS. Remote VoDog client features are buildable independently of module audio. This distribution **includes the required QDC507 kernel modules, compiled PCM helper and manifest** from pinned public CellDock upstream. Default macOS packaging includes them. Exact corresponding kernel source/build inputs remain unavailable; binary inclusion does not resolve that source gap. Read the [runtime requirements and acquisition/build procedure](../apps/macos/module/RUNTIME.md).
 
-Without a compliant, independently built compatible runtime, do not claim working DJI local calls, gateway audio, recording capture, or AI audio through that module. Modem data/SMS depend on firmware and still need hardware validation. Synthetic payload tests do not load or validate real drivers.
+The runtime binaries are available from CellDock upstream; the missing materials are their exact corresponding kernel source/build patches, not the binaries themselves. You can initialize and test a supported module with the upstream application, then build VoDog with its bundled, hash-verified runtime. Synthetic payload tests do not load or validate real drivers.
+
+## 0. Prepare a purchased module with upstream CellDock
+
+1. Check the seller's model identification: this path is for **DJI QDC507 / Quectel EG25-G**, not every DJI 4G/4G Enhanced Transmission module. Use a USB data cable/adapter with stable power and an active SIM that supports voice and SMS. Check SIM PIN and carrier VoLTE availability. No soldering or generic firmware flashing is prescribed by this procedure.
+2. Obtain CellDock from its [official releases](https://github.com/celldock/celldock-for-mac/releases). Release [0.3.1](https://github.com/celldock/celldock-for-mac/releases/tag/0.3.1) was available when this guide was checked on 2026-09-29. Install the upstream app and connect only the module being prepared; close VoDog and other modem/AT/ADB tools.
+3. Let CellDock inspect the device. If it shows the original DJI configuration, use **Convert and Restart** (Chinese UI: “转换并重启”). Its guarded conversion checks the selected device, idle call state, unlock challenge and exact USB settings, enables the supported interfaces, reads settings back, then restarts. Do not paste another device's unlock response or bypass an unsupported-configuration result.
+4. If the device instead needs ECM initialization, use **Confirm Initialization** (“确认初始化”) and wait for re-enumeration. For this DJI route, the target is USB `2C7C:0125`, AT/ADB/audio enabled and CDC-ECM `usbnet=1`. “Module ready” establishes USB/network preparation, not successful two-way voice.
+5. In CellDock, verify SIM registration, SMS, an incoming and outgoing call, audio in both directions and recording with a consenting test participant. The referenced QDC507 runtime expects root ADB, kernel `3.18.44`, its matching sound card/devices and the proper UAC path. App diagnostics should identify failures; an arbitrary kernel with the same version string is not proof of ABI compatibility.
+6. Quit CellDock before VoDog takes ownership. Build the VoDog app with the included runtime as described below, then pair and test VoDog independently. CellDock initialization does **not** make a payload-free VoDog build work: drivers/helper are prepared at runtime, and VoDog still validates its own bundled payload even if a driver is already loaded.
+
+CellDock 0.3.1 also supports certain **native Quectel** devices without ADB/KO injection. That is a different backend, not a way to bypass the DJI QDC507 runtime requirement in this export. See the [upstream release notes](https://github.com/celldock/celldock-for-mac/releases/tag/0.3.1).
+
+Source references: upstream [initialization UI](https://github.com/celldock/celldock-for-mac/blob/6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c/Sources/CellDock/CellDockInitialSetupView.swift), [guarded conversion](https://github.com/celldock/celldock-for-mac/blob/6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c/Sources/CellDock/ModemService.swift), and [runtime manifest](https://github.com/celldock/celldock-for-mac/blob/6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c/Resources/ModuleVoice/manifest.json). These are public upstream references, not a record of a private installation.
 
 ## 1. Build and configure the Mac app
 
@@ -38,7 +51,7 @@ Connect one idle QDC507 over a USB data connection. Keep other AT/ADB tools clos
 
 Conversion changes configuration and reboots the module; do not unplug it mid-operation or perform conversion during a call. Do not flash generic EG25 firmware or firmware for a different DJI product. No stock firmware is supplied. If identification or preparation fails, stop and use the component's diagnostics rather than forcing another model's settings.
 
-For module voice, obtain the exact corresponding source, patches, kernel configuration, symbol versions and toolchain from the runtime supplier/upstream maintainer. Build and validate compatible components independently. Set `VODOG_MODULE_VOICE_DIR` to a private directory containing those components and a matching size/SHA-256 manifest when packaging. Leaving it unset builds without the optional voice payload. The repository does not automatically fetch an unverified payload.
+The [runtime guide](../apps/macos/module/RUNTIME.md) documents the bundled CellDock components and hash verification. Default packaging uses `Resources/ModuleVoice`; `VODOG_MODULE_VOICE_DIR` is only needed for a reviewed replacement. Its manifest and all three binary hashes match this export's reference manifest. This establishes binary provenance, not hardware acceptance or complete corresponding source. Public redistribution still requires the exact source/build materials and applicable notices; obtain those from the supplier/maintainer or build from complete source. Leaving the variable unset uses the bundled payload.
 
 ## 3. Pair, assign, and check readiness
 
@@ -52,6 +65,6 @@ Credentials use Keychain and a module copy at `/data/vodog/vodog-gateway.json`. 
 
 ## 4. Test the right path
 
-A remote SIM uses Control and relay media. An eligible local attached SIM can use direct Mac/module audio; shared recording still requires capture binding and archive finalization. Confirm which route the UI selected. Complete [acceptance](operations.md) only after the missing runtime prerequisite is resolved, with approved calls/SMS and separate audio, recording, AI, and reconnect checks.
+A remote SIM uses Control and relay media. An eligible local attached SIM can use direct Mac/module audio; shared recording still requires capture binding and archive finalization. Confirm which route the UI selected. Complete [acceptance](operations.md) after checking the bundled runtime on your hardware, with approved calls/SMS and separate audio, recording, AI, and reconnect checks.
 
-The missing payload also blocks helper-backed VoWiFi control/status, ECM recovery and module credential import/export. A payload-free build is not a functioning DJI gateway. The PCM helper source/build recipe is included, but building it alone does not replace the missing kernel modules.
+The bundled payload also supports helper-backed VoWiFi control/status, ECM recovery and module credential import/export. A missing or invalid payload still blocks those paths. The PCM helper source/build recipe is included; the two kernel modules are supplied as upstream binaries, with their source gap recorded separately.

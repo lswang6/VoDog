@@ -30,8 +30,10 @@ website/
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
 
-# Optional firmware/runtime payloads are not part of the public source export.
-Resources/ModuleVoice/
+# Generated payloads and unreviewed binaries; only pinned upstream components are kept.
 *.ko
 *.armv7
 *.payload
+!Resources/ModuleVoice/qdc507_aprv3.ko
+!Resources/ModuleVoice/qdc507_voice.ko
+!Resources/ModuleVoice/celldock-pcm-bridge.armv7

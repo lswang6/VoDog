@@ -8,7 +8,7 @@ Use this sequence to help a user install the public repository on a **fresh, ded
 
 Ask for the public repository URL, application domain, TURN domain, host interface/public IPv4, ACME email, desired admin username, and gateway choice. Confirm at least 4 GB RAM, available recording storage, a supported voice/SMS SIM, and an unlockable rooted Pixel or the specific DJI QDC507 / EG25-G. Apple, FCM, and AI credentials can be added later; they are not required to build the basic services.
 
-Read [host requirements](infra/README.md), [hardware](docs/hardware.md), and [license boundaries](docs/licensing.md). First-party code is AGPL-3.0; CellDock-derived macOS code retains its non-commercial terms. The DJI module voice kernel/PCM payload is excluded: module audio cannot be accepted until a compliant compatible runtime is independently supplied. The remote Mac client can be built without it.
+Read [host requirements](infra/README.md), [hardware](docs/hardware.md), and [license boundaries](docs/licensing.md). First-party code is AGPL-3.0; CellDock-derived macOS code retains its non-commercial terms. The public CellDock DJI kernel/PCM binaries are now bundled unchanged. Exact corresponding kernel source/configuration/patches have not been obtained; do not claim complete or reproducible kernel source or resolved redistribution obligations. Kernel modules retain GPL-2.0 terms. See [runtime provenance](apps/macos/module/RUNTIME.md). Bundling does not establish physical module acceptance.
 
 ## 2. Clone the public repository
 
@@ -89,7 +89,7 @@ defaults write org.vodog.macos VoDogBaseURL -string 'https://vodog.example.com'
 
 Install the reviewed signed package, approve its expected helper, and restart the app. Use your domain; the built-in `https://vodog.example.invalid` is deliberately unusable. `VODOG_BASE_URL` is an alternative process-environment setting. Gateway pairing has a separate server URL.
 
-For the supported module only, use the app's guarded identity conversion from USB `2CA3:4006` to `2C7C:0125`; keep other AT/ADB tools closed. Voice additionally requires the excluded runtime described in [module/RUNTIME.md](apps/macos/module/RUNTIME.md). Only after independently obtaining/building compatible components, provide their private directory via `VODOG_MODULE_VOICE_DIR` during packaging. Without it, stop DJI gateway acceptance: helper-backed control, ECM recovery and module credential transport are also affected. Do not force a ready status.
+For the supported module only, use the app's guarded identity conversion from USB `2CA3:4006` to `2C7C:0125`; keep other AT/ADB tools closed. Packaging uses the bundled `apps/macos/Resources/ModuleVoice/` runtime by default; `VODOG_MODULE_VOICE_DIR` is an optional override. See [runtime provenance and limits](apps/macos/module/RUNTIME.md). Verify kernel 3.18.44 with compatible ABI, root ADB, UAC, payload integrity and runtime readiness before gateway acceptance; helper-backed control, ECM recovery and module credential transport also depend on the runtime. Initialization alone is insufficient. Preserve fail-closed checks and do not force a ready status. Payload packaging/checksum validation and physical acceptance must be recorded separately; neither is established by these instructions.
 
 ## 6. Pair, assign, and add optional services
 
@@ -129,7 +129,7 @@ Return the commands/results, actual installed components, skipped checks, remain
 4. **安装：**完成本地检查后执行 `sudo bash infra/install-host.sh /srv/vodog-state <自己的ACME邮箱>`。安装会接受 CA 条款、构建容器、迁移数据库、创建管理员并启动服务。示例域名会被拒绝；不要随意重复 seed，它会重置同名账号。详见[主机工具](infra/README.md)。
 5. **服务检查：**执行上方 Compose `ps`、构建 Go probe、`infra/check-media.py` 和真实 TURN 域名的证书验证；完成 Web 新登录与内部路由隔离检查。probe 不拨电话，UDP echo 与真实 TLS 媒体仍需分别验证。
 6. **Pixel：**按 [Pixel 设置](docs/pixel-setup.zh-CN.md)，运行 `scripts/build-android.sh`，用准确 `aapt` 与已验证 SELinux 域构建模块，审核 ZIP/manifest；空闲时在 Magisk 从本地安装并重启，检查特权与运行时权限、Google 默认拨号器、SELinux。固件从官方获得，不分发修改镜像；代码已修复可选 BCP 缺失时的获取/释放/恢复并有专项回归覆盖，全新无 BCP 真机安装仍未验收。
-7. **Mac/DJI：**按上方 Swift 构建/测试/签名命令，用 `VODOG_CODESIGN_IDENTITY` 指定真实证书。通过 `VoDogBaseURL` 或进程环境 `VODOG_BASE_URL` 设服务器并重启，另设网关配对服务器。默认 `.invalid` 不可用。仅 QDC507/EG25-G 使用受保护 USB 身份转换；缺失内核/PCM 载荷时不能继续音频验收。按[运行时说明](apps/macos/module/RUNTIME.md)独立取得并构建兼容组件后，才通过 `VODOG_MODULE_VOICE_DIR` 打包。见 [DJI 教程](docs/dji-setup.zh-CN.md)。
+7. **Mac/DJI：**按上方 Swift 构建/测试/签名命令，用 `VODOG_CODESIGN_IDENTITY` 指定真实证书。通过 `VoDogBaseURL` 或进程环境 `VODOG_BASE_URL` 设服务器并重启，另设网关配对服务器。默认 `.invalid` 不可用。仅 QDC507/EG25-G 使用受保护 USB 身份转换；默认打包已随附的 `apps/macos/Resources/ModuleVoice/` 公开二进制，`VODOG_MODULE_VOICE_DIR` 仅为可选覆盖。按[运行时来源与限制](apps/macos/module/RUNTIME.md)核对内核 3.18.44、兼容 ABI、root ADB、UAC、载荷完整性和运行时就绪；初始化不足以验收，检查失败时保持阻断。精确对应内核源码、配置及补丁仍未取得，不能声称源码完整、可重复构建或再分发义务已解决；GPL-2.0 与 CellDock 非商业条款仍适用。打包/校验和验证与真机验收须单独记录，本说明不表示通过。见 [DJI 教程](docs/dji-setup.zh-CN.md)。
 8. **配对：**Web 建网关和配对码，关闭状态输入服务器与配对码，分配发现的 SIM，启用后逐项查电话/短信/媒体和设置 applied ACK。
 9. **可选能力：**`voice.env` 配供应商，启动 voice 并验健康，再在 `control.env` 开 AI 两门并重建 Control；转录和报告由 Control 运行，不另起重复 worker。iOS 用 `VoDog` scheme、自己的团队与 `VODOG_DOMAIN`，后台需 APNs；Android 后台需自备 Firebase/FCM。
 10. **验收交付：**按[运维清单](docs/operations.zh-CN.md)分别记录各端、真实电话/短信、双向音频、录音、AI、后台、重连、恢复，明确跳过/受阻项和回滚位置。公开[检查摘要](docs/release-checks.md)不等于新部署完成，CI 文件存在不等于 CI 已运行。

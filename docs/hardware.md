@@ -1,6 +1,6 @@
 # Hardware requirements
 
-**Voice payload is not bundled:** the compatible QDC507 kernel modules and compiled module PCM payload are excluded. Preparing USB identity alone cannot establish module voice. See [DJI setup](dji-setup.md) and its runtime requirements.
+**Voice payload is bundled:** the public CellDock QDC507 kernel modules and compiled PCM bridge are included unchanged. Kernel 3.18.44 with a compatible ABI, root ADB and UAC are still required. Preparing USB identity or completing initialization alone cannot establish module voice; fail-closed readiness checks remain required and physical acceptance is pending. See [DJI setup](dji-setup.md) and [runtime provenance and limits](../apps/macos/module/RUNTIME.md).
 
 [Documentation](README.md) · [简体中文](hardware.zh-CN.md)
 

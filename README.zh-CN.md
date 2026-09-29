@@ -1,6 +1,6 @@
 # VoDog
 
-![VoDog](assets/brand/vodog.png)
+![VoDog 小狗带你使用远程 SIM 通话、短信、多号码管理、AI 接听、录音同步与自动转录](assets/illustrations/vodog-feature-hero.png)
 
 **让你的 SIM 号码，随设备而行。**
 
@@ -29,7 +29,7 @@ VoDog 是可自行部署的通话与短信系统。接入兼容的已 root Pixel
 Pixel 实现以 Pixel 7 Pro 集成为基础，不能据此认定其他 Pixel、Android 版本、运营商定制机或普通 LTE 网卡全部受支持。DJI 路径也不代表支持所有 DJI 产品。选购前请读[硬件要求](docs/hardware.zh-CN.md)。
 
 
-DJI 本机/网关语音需要另行取得并验证的兼容运行时；本发行排除了缺少准确对应源码的内核二进制。详见 [DJI 设置](docs/dji-setup.zh-CN.md)。
+DJI 必需运行时二进制与上游清单已包含，默认构建自动打包；仍需验证硬件/固件兼容性，内核完整对应源码与构建材料尚未齐备。详见 [DJI 设置](docs/dji-setup.zh-CN.md)。
 
 ## 系统结构
 
@@ -75,7 +75,7 @@ Web / iOS / Android / macOS 通过 HTTPS 连接 Control。Pixel 与 Mac 上的 D
 
 **VoDog 是混合许可的源码发行。** 第一方 VoDog 代码采用 **AGPL-3.0-only**，以根目录许可及文件级声明为准。第三方代码保留原许可。尤其是 **CellDock 衍生的 macOS 代码仍受自定义非商业许可约束**：允许在保留署名的前提下复制、修改和分发，不允许商业用途。根目录 AGPL 不能覆盖此限制。
 
-macOS 部分以非商业条款提供源码，其可选语音内核二进制因缺少准确对应源码与构建材料而未包含。各组件的使用与再分发条件见[许可与署名](docs/licensing.zh-CN.md)。
+macOS 部分以非商业条款提供源码，其必需运行时二进制已从固定 CellDock 上游提交归档，但完整对应内核源码与构建材料仍未取得。各组件的使用与再分发条件见[许可与署名](docs/licensing.zh-CN.md)。
 
 [Pixel 设置教程](docs/pixel-setup.zh-CN.md) · [DJI 设置教程](docs/dji-setup.zh-CN.md) · [主机安装工具](infra/README.md)
 

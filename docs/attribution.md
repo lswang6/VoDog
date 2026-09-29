@@ -18,6 +18,6 @@ VoDog retains third-party authorship separately from its product branding. Prese
 | ffmpeg | Optional recording conversion/export tool |
 | xAI, Doubao, Gemini and OpenAI-compatible APIs | External service integrations; credentials and provider terms are separate |
 
-Read the root license, the macOS component's retained license, lockfiles/manifests, and vendored notices for exact scope. Excluded module voice binaries are not supplied or covered by a new permission grant. No contributor identity is removed merely because an application name or endpoint is neutralized.
+Read the root license, the macOS component's retained license, lockfiles/manifests, and vendored notices for exact scope. The module voice binaries are now included unchanged from public CellDock commit `6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c`; see [runtime provenance](../apps/macos/module/RUNTIME.md). Kernel modules retain GPL-2.0 terms, and CellDock noncommercial terms remain applicable. Exact corresponding kernel source/configuration/patches have not been obtained; no complete or reproducible kernel source or resolved redistribution obligations are claimed. Bundling grants no new permission. No contributor identity is removed merely because an application name or endpoint is neutralized.
 
 [Contributors and upstream acknowledgments / 贡献者与上游致谢](../CONTRIBUTORS.md)

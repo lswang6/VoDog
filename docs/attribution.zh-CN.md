@@ -18,6 +18,6 @@ VoDog 将第三方作者署名与产品品牌分开保留。组件、依赖包�
 | ffmpeg | 可选录音转换与导出工具 |
 | xAI、豆包、Gemini 与 OpenAI 兼容 API | 外部服务集成，凭据与供应商条款独立 |
 
-准确范围以根许可、macOS 保留许可、锁文件/manifest 和 vendor 声明为准。已排除的模组语音二进制没有随附，也不存在新增许可授权。应用改名或端点脱敏不是删除贡献者身份的理由。
+准确范围以根许可、macOS 保留许可、锁文件/manifest 和 vendor 声明为准。现已原样包含 CellDock 公开提交 `6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c` 的模组语音二进制，见[运行时来源](../apps/macos/module/RUNTIME.md)。内核模块保留 GPL-2.0 条款，CellDock 非商业条件仍适用。尚未取得精确对应的内核源码、配置和补丁，不声称内核源码完整或可重复构建，也不声称再分发义务已解决。随附不构成新增许可授权。应用改名或端点脱敏不是删除贡献者身份的理由。
 
 [Contributors and upstream acknowledgments / 贡献者与上游致谢](../CONTRIBUTORS.md)

@@ -4,6 +4,9 @@ apps/macos/Sources/CEuiccCore/Vendor/** linguist-vendored
 apps/macos/ThirdParty/vowifi-go/vendor/** linguist-vendored
 apps/android/gateway/third_party/** linguist-vendored
 infra/pixel/external/** linguist-vendored
+apps/macos/Resources/ModuleVoice/** linguist-vendored
+*.ko binary
+*.armv7 binary
 *.png binary
 *.icns binary
 *.jar binary

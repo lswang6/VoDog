@@ -1,0 +1,44 @@
+{
+  "formatVersion": 1,
+  "runtimeVersion": "qdc507-3.18.44-voice-20260712.5",
+  "kernelRelease": "3.18.44",
+  "cardName": "mdm9607-tomtom-i2s-snd-card",
+  "helper": "celldock-pcm-bridge.armv7",
+  "files": [
+    {
+      "name": "qdc507_aprv3.ko",
+      "mode": 420,
+      "size": 36664,
+      "sha256": "3d82d3dec4f1e323201bba87156df9d41438e08314097353f2607f9117211d4a"
+    },
+    {
+      "name": "qdc507_voice.ko",
+      "mode": 420,
+      "size": 999236,
+      "sha256": "ed3821682d5309969a01c764192c83feff9669c61ef237c69475cd1619cf296c"
+    },
+    {
+      "name": "celldock-pcm-bridge.armv7",
+      "mode": 493,
+      "size": 17860,
+      "sha256": "c5517b13cc2d49c425e3ecf58f967a0c02cb9d4c893766cb814bb4c98cf5ede4"
+    }
+  ],
+  "modules": [
+    {
+      "file": "qdc507_aprv3.ko",
+      "name": "qdc507_aprv3"
+    },
+    {
+      "file": "qdc507_voice.ko",
+      "name": "qdc507_voice"
+    }
+  ],
+  "requiredDevices": [
+    "/dev/snd/controlC0",
+    "/dev/snd/pcmC0D4p",
+    "/dev/snd/pcmC0D4c",
+    "/dev/snd/pcmC0D5p",
+    "/dev/snd/pcmC0D6c"
+  ]
+}

@@ -5,6 +5,9 @@
 This page describes the public source export, not a preconfigured hosted service or
 physical-device certification. All examples and showcase screenshots use fictional data.
 
+The test counts below are previously validated results, not a rerun after bundling
+the DJI runtime. Bundled runtime size/hash checks and payload construction passed; the app payload decoder and tamper-rejection check passed against the real upstream payload. macOS base self-tests were rerun and passed. A full signed app archive and physical module acceptance were not performed.
+
 | Component | Validation | Boundary |
 | --- | --- | --- |
 | Web | 380 unit tests; production and isolated demo builds passed | Three demo screenshots reviewed; no live account used |
@@ -23,10 +26,12 @@ status; workflow configuration alone is not a passing result.
 
 ## Explicit limitations
 
-- The DJI module's optional kernel runtime is excluded because exact corresponding
-  source/build inputs have not been located. This also affects helper-backed module
-  control and credential transport. See [runtime requirements](../apps/macos/module/RUNTIME.md).
-  A payload-free macOS build is **not** a working fresh DJI gateway.
+- The public CellDock kernel/PCM runtime is now bundled unchanged. Exact corresponding
+  kernel source/configuration/patches have not been obtained; complete or reproducible
+  kernel source and resolved redistribution obligations are not claimed. GPL-2.0
+  kernel-module terms remain applicable. See [runtime provenance](../apps/macos/module/RUNTIME.md).
+  Kernel 3.18.44 with compatible ABI, root ADB and UAC remain required. Initialization
+  alone is insufficient; fail-closed checks remain and physical acceptance is pending.
 - CellDock-derived code retains its noncommercial license. The repository is a
   mixed-license distribution; see [licensing](licensing.md).
 - Native signing, APNs/FCM, passkeys, real calls/SMS, actual audio, AI provider behavior,
@@ -42,6 +47,8 @@ Voice 的 242 项测试及隔离数据库中的 82 项保留策略测试已通�
 Android 客户端 484 项通过、网关 587 项通过且 2 项因前提跳过；iOS 模拟器 462 项通过；
 Control 的 490 项测试通过。媒体完整 race 测试最终通过，早期出现过基线也可复现的宿主网络时序失败。
 
-DJI 内核运行时因缺少精确对应源码与构建材料未随包发布，影响语音及部分模块控制功能，
-不能把不含该运行时的 macOS 构建当作可直接使用的全新 DJI 网关。
+以上测试数主要为此前已验证结果；本次重新通过 macOS 基础自测、真实上游载荷构建、应用解包和篡改拒绝检查，以及全部运行时大小/哈希校验。未执行完整签名 App 打包或真实模组验收。
+现已原样随附 CellDock 公开内核/PCM 二进制；精确对应的内核源码、配置及补丁仍未取得，
+不声称源码完整或可重复构建，也不声称再分发义务已解决，内核模块的 GPL-2.0 条款仍适用。
+仍需内核 3.18.44、兼容 ABI、root ADB 与 UAC；初始化不足以验收，检查失败时保持阻断，真机验收尚未完成。
 CellDock 部分保留非商业许可。Control、媒体、Voice、Web 与 TURN 的 Linux 容器构建已在 GitHub Actions 通过；保留策略容器也纳入 CI。全新 VPS、签名、后台推送与真实蜂窝功能仍须分别验收。

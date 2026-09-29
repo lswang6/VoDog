@@ -19,6 +19,6 @@ TURN 凭据及节点配置见[安装教程](installation.zh-CN.md)和 [infra](..
 
 libopus 源码及 Pixel 支持组件快照已包含。系统框架、浏览器和包管理器依赖仍需按构建清单获取；这不是所有平台依赖的完全离线镜像。WebRTC 源码快照及外部依赖边界见 [Pixel 存档](../infra/pixel/external/README.md)。
 
-DJI 的用户态 [PCM helper 源码](../apps/macos/module/celldock_pcm_bridge.c)和[构建脚本](../apps/macos/scripts/build_pcm_bridge_armel.sh)已包含。但 `qdc507_voice.ko`、`qdc507_aprv3.ko` 缺少准确对应源码和构建补丁，因此未发布二进制。不能声称 DJI 底层全部齐备或开箱即用，见[运行时缺口](../apps/macos/module/RUNTIME.md)。
+DJI 的用户态 [PCM helper 源码](../apps/macos/module/celldock_pcm_bridge.c)和[构建脚本](../apps/macos/scripts/build_pcm_bridge_armel.sh)已包含。现已在 `apps/macos/Resources/ModuleVoice/` 原样包含 CellDock 公开的 `qdc507_voice.ko`、`qdc507_aprv3.ko`、`celldock-pcm-bridge.armv7` 及 `manifest.json`。精确对应的内核源码、配置和补丁仍未取得，不声称内核源码完整或可重复构建，也不声称再分发义务已解决；内核模块的 GPL-2.0 与 CellDock 非商业条款继续适用。仍需内核 3.18.44、兼容 ABI、root ADB 和 UAC；初始化不足以验收，检查失败时仍须阻断，真机验收尚未完成。见[运行时来源与限制](../apps/macos/module/RUNTIME.md)。
 
 [源码表与相关测试](audio-transport.md) · [发行验证及剩余限制](release-checks.md)

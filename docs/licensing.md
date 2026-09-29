@@ -12,7 +12,7 @@ This repository must therefore not be described as wholly OSI open source, wholl
 
 ## Distribution boundaries
 
-Retained upstream notices govern modified CellDock-derived files and bundled dependencies alongside the first-party license. QDC507 kernel binaries and the compiled module PCM payload are excluded; see the [runtime exclusions](../apps/macos/module/RUNTIME.md) for why and what voice functionality is unavailable. A directory boundary or build success does not grant additional redistribution rights.
+Retained upstream notices govern modified CellDock-derived files and bundled dependencies alongside the first-party license. QDC507 kernel binaries and the compiled PCM bridge are now included unchanged from public CellDock commit `6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c`; see [runtime provenance and source limits](../apps/macos/module/RUNTIME.md). The kernel modules retain GPL-2.0 terms and the CellDock noncommercial terms remain applicable to its component. Exact corresponding kernel source, configuration and patches have not been obtained. Inclusion does not establish complete or reproducible kernel source, or resolve redistribution obligations. A directory boundary or build success does not grant additional redistribution rights.
 
 Before distributing an artifact:
 

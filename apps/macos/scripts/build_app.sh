@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
+# Bundle the pinned upstream runtime by default; allow a reviewed local replacement.
+VODOG_MODULE_VOICE_DIR="${VODOG_MODULE_VOICE_DIR:-$ROOT/Resources/ModuleVoice}"
 mkdir -p "$ROOT/.build/caches/clang" "$ROOT/.build/caches/swiftpm"
 mkdir -p "$ROOT/.build/home"
 export HOME="${HOME:-$ROOT/.build/home}"
@@ -242,6 +244,8 @@ for license_root in "$ROOT/Sources/CEuiccCore/Vendor/lpac" "$ROOT/Sources/COpus/
   done < <(find "$license_root" -type f \( -iname '*license*' -o -iname 'copying*' -o -name AUTHORS -o -name REUSE.toml \))
 done
 cp "$ROOT/docs/COPYING-GPL-2.0" "$STAGE_PACKAGE_DIR/Legal/"
+cp "$ROOT/Resources/ModuleVoice/README.md" "$STAGE_PACKAGE_DIR/Legal/QDC507-PROVENANCE.md"
+cp "$ROOT/Resources/ModuleVoice/manifest.json" "$STAGE_PACKAGE_DIR/Legal/QDC507-manifest.json"
 
 ditto -c -k --sequesterRsrc "$STAGE_PACKAGE_DIR" "$STAGE_ZIP"
 mkdir -p "$VERIFY_DIR"

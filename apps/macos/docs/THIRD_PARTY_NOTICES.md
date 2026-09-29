@@ -34,8 +34,8 @@ Their complete corresponding source and license texts are present under
 also satisfy LGPL-2.1 section 6 relinking requirements, or obtain lpac's
 commercial license.
 
-The optional, separately supplied QDC507 voice runtime uses two loadable Linux kernel modules
-derived from `the-modem-distro/quectel_eg25_kernel`, commit
+The bundled public CellDock QDC507 voice runtime uses two loadable Linux kernel modules
+whose recorded kernel-tree provenance is `the-modem-distro/quectel_eg25_kernel`, commit
 `82ed00908b3e8efc3ff0de27d2b5a7c0524ecd7f`, under GPL-2.0:
 
 - <https://github.com/the-modem-distro/quectel_eg25_kernel>
@@ -72,7 +72,14 @@ The original CellDock root LICENSE is preserved unchanged. VoDog original additi
 use AGPL-3.0-only; inherited code and vendor code retain their original terms.
 Upstream CellDock: https://github.com/celldock/celldock-for-mac .
 
-Distribution limitation: QDC507 runtime binaries are excluded from this public export.
-The exact module source/build patches were unavailable; see module/RUNTIME.md.
-Optional runtime packaging requires a separately supplied compliant build. The PCM
-helper's source and build script are present, but its prebuilt binary is also excluded.
+The public CellDock `qdc507_aprv3.ko`, `qdc507_voice.ko` and
+`celldock-pcm-bridge.armv7` binaries plus `manifest.json` are included unchanged from
+commit `6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c` in `Resources/ModuleVoice/`.
+Default packaging uses this directory; `VODOG_MODULE_VOICE_DIR` is an optional override.
+See [runtime provenance and source limits](../module/RUNTIME.md). The kernel tree
+identified above is a provenance reference, not complete corresponding source for
+the shipped modules: exact kernel source/configuration/patches have not been obtained.
+No complete or reproducible kernel source or resolved redistribution obligations are
+claimed. The kernel modules retain GPL-2.0 terms; CellDock noncommercial terms remain
+applicable to its component. The PCM helper source and build script are also present.
+Bundled runtime size/hash checks, payload construction and app payload decoding passed; this is not physical-device acceptance or a full signed archive build.

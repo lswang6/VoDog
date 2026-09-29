@@ -1,0 +1,22 @@
+# VoDog feature hero: generation prompt
+
+Generated with the built-in image generation tool. Original fictional mascot and illustrative feature scenes; no real account or device data. This image is a capability overview, not a screenshot or hardware acceptance result.
+
+```text
+Use case: infographic-diagram + illustration-story.
+Asset type: one premium illustrated GitHub README hero for VoDog, wide landscape about 16:9, high resolution, opaque background. This is a feature overview illustration, not a screenshot.
+Primary request: Make a charming, memorable illustrated feature map of a self-hosted real-SIM calling/SMS project called VoDog. One consistent original cute dog mascot participates in six little scenes, so the entire image tells a coherent story.
+Mascot design: a small cream-and-caramel puppy, floppy ears (one caramel ear), round face, tiny black bean nose, expressive dark eyes, short paws, wearing a teal collar with a small gold SIM-card-shaped tag. Warm and clever, playful but professional. Do not copy any existing dog/cartoon mascot. Keep the puppy's design consistent across all scenes.
+Style: refined editorial storybook meets modern product illustration. Soft rounded 3D-like forms rendered with clean illustrated outlines and a subtle paper grain, friendly rounded devices, restrained shadows, warm ivory background, deep ink typography, teal and mint accents, apricot highlights. Clean enough for a technical project's homepage; no glossy corporate stock art. Each scene distinct and instantly legible.
+Composition: generous whitespace and clear hierarchy. Top center large exact brand word "VoDog", below it a short exact subtitle "Your SIM, across your devices." Main area is a balanced 3-column x 2-row set of six illustrated feature vignettes, without heavy card borders. A gentle dotted teal path with occasional pawprints connects the scenes into one network. Puppy appears actively in every vignette. Each vignette has a bold short English title and a smaller accurate Simplified Chinese title directly under it. These labels must be highly readable at GitHub README width; no dense paragraphs.
+Six scenes, reading left to right top to bottom:
+1. "Remote SIM Calls" / "远程 SIM 通话": puppy wearing a headset and lifting a handset beside a smartphone with a visible SIM icon; a curved signal path goes to a distant laptop, conveying using a real SIM remotely.
+2. "Remote SMS" / "远程短信": puppy delivering two rounded chat envelopes between a phone and laptop. Only minimal speech symbols or "Hi!" in bubbles, no real names or phone numbers.
+3. "All Your Numbers" / "多号码集中管理": puppy neatly sorting three SIM cards in a little organizer in front of one unified dashboard. Cards labeled only "SIM A", "SIM B", "SIM C". Convey organized selection, not three simultaneous calls on one modem.
+4. "AI Answers" / "AI 自动接听": puppy as a friendly receptionist with headset at a tiny desk, beside an incoming-call icon and a small glowing AI speech bubble; a simple clock icon subtly suggests answering when away.
+5. "Record & Sync" / "录音 · 多端同步": puppy handling a small waveform tape/reel with thin sync arrows linking a generic desktop, laptop and two phones. Show saved conversations reaching devices. Make the waveform friendly and readable.
+6. "Auto Transcription" / "自动转录": puppy with a pencil watching an audio waveform become tidy written lines on a page; small check mark. Use abstract lines instead of fabricated transcript text.
+Bottom: small elegant centered supported-client line exactly "Web · iOS · Android · macOS". Add two small gateway silhouettes at footer edges, rooted-phone shape and USB cellular module beside a Mac, with only short labels "Pixel gateway" and "Mac + DJI module". These are capability illustrations, not claims of hardware certification.
+Text accuracy: render VoDog with uppercase V and D. Preserve all six English labels, the Chinese subtitles, and the platform line exactly. Use clear rounded sans-serif typography. If scene internals contain labels, only the fictional SIM A/B/C and Hi! above. No additional paragraphs.
+Constraints: original illustration only; no real accounts, credentials, phone numbers, IPs, domains, QR codes, hardware serial numbers, logos of other companies, flags, watermarks or copyrighted cartoon characters. No suggestion of free service, guaranteed compatibility, offline AI, unlimited simultaneous calling, or end-to-end encryption. No money imagery. No screenshot imitation. Visually delightful but precise about the six requested features.
+```

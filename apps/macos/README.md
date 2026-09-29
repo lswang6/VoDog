@@ -38,16 +38,24 @@ credentials use /data/vodog/vodog-gateway.json, separate from the upstream names
 
 DJI QDC507 / Quectel EG25-G, suitable SIM/carrier voice/SMS plan and USB data required.
 Convert factory USB 2CA3:4006 through the guarded app flow to 2C7C:0125 with ADB/audio
-and ECM (usbnet=1). USB audio is 8 kHz. The optional, separately acquired ARMv7 runtime requires
-kernel 3.18.44, card mdm9607-tomtom-i2s-snd-card and controlC0 plus PCM D4p/D4c/D5p/D6c.
+and ECM (usbnet=1). USB audio is 8 kHz. The bundled ARMv7 runtime requires
+kernel 3.18.44 with a compatible ABI, root ADB, card mdm9607-tomtom-i2s-snd-card and controlC0 plus PCM D4p/D4c/D5p/D6c.
+Initialization alone is insufficient; preserve fail-closed compatibility, integrity
+and readiness checks. Hardware acceptance is pending.
 This is not generic EG25 firmware support. Do not flash unrelated firmware. The app
 exclusively owns USB. A logged-in GUI session is required; the network helper needs
 administrator approval. eSIM requires a compatible eUICC, not an ordinary nano-SIM.
 
 ## Distribution status
 
-Offline builds do not establish live cellular acceptance. QDC507 runtime binaries
-are excluded because exact corresponding source/build patches were unavailable.
-See module/RUNTIME.md for affected voice functionality and explicit optional packaging.
+Offline builds do not establish live cellular acceptance. Public CellDock runtime binaries
+`qdc507_aprv3.ko`, `qdc507_voice.ko`, `celldock-pcm-bridge.armv7` and `manifest.json`
+are included unchanged from commit `6d0461de3a94292e7549a1d8e6e9180bd0b5ed0c`
+in `Resources/ModuleVoice/`, the default packaging directory.
+`VODOG_MODULE_VOICE_DIR` remains an optional override. See [runtime provenance](module/RUNTIME.md).
+Exact corresponding kernel source/configuration/patches have not been obtained;
+complete or reproducible kernel source and resolved redistribution obligations are
+not claimed. GPL-2.0 kernel-module and CellDock noncommercial terms remain applicable.
+Bundled runtime size/hash checks, payload construction, app payload decoding and tamper rejection passed. A full signed app archive and physical module acceptance were not performed.
 LGPL static relinking and separate AGPL VoWiFi runtime source obligations apply.
 This export is not blanket AGPL relicensing. No live installation is part of validation.
