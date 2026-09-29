@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [control, media, voice, web, turn]
+        target: [control, media, voice, web, turn, retention]
     steps:
       - uses: actions/checkout@v4
       - name: Build standalone Linux image

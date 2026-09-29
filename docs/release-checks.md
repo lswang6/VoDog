@@ -14,11 +14,11 @@ physical-device certification. All examples and showcase screenshots use fiction
 | Control | TypeScript build and 490 tests passed against disposable databases | No production database accessed |
 | Voice | 242 tests passed; one optional integration test skipped | No live AI provider calls |
 | Media | Build, full media race suite and archive-validator race suite passed | Earlier host-network ICE timing failures were reproduced with the baseline; final ordinary-network run passed without weakening assertions |
-| Infrastructure | Configuration generation tests and Compose schema checks passed; 82 retention tests passed with a disposable database | Linux image builds and fresh-host installation are separate checks |
+| Infrastructure | Configuration generation tests and Compose schema checks passed; 82 retention tests passed with a disposable database | Control, media, voice, Web and TURN Linux images passed GitHub Actions; fresh-host installation is not exercised |
 | Publication | File/identity scanning, dedicated secret scanning and recursive component-archive inspection | Upstream test keys and public fingerprints are reviewed separately from operational credentials |
 
 [GitHub Actions](https://github.com/lswang6/VoDog/actions) checks the publication set,
-document links, component hashes and Linux container builds. Consult the actual run
+document links, component hashes and all six Linux container targets, including retention. The [initial source-release run](https://github.com/lswang6/VoDog/actions/runs/36592084657) passed publication checks and the first five image targets. Consult the actual run
 status; workflow configuration alone is not a passing result.
 
 ## Explicit limitations
@@ -44,4 +44,4 @@ Control 的 490 项测试通过。媒体完整 race 测试最终通过，早期�
 
 DJI 内核运行时因缺少精确对应源码与构建材料未随包发布，影响语音及部分模块控制功能，
 不能把不含该运行时的 macOS 构建当作可直接使用的全新 DJI 网关。
-CellDock 部分保留非商业许可。容器、全新 VPS、签名、后台推送与真实蜂窝功能须分别验收。
+CellDock 部分保留非商业许可。Control、媒体、Voice、Web 与 TURN 的 Linux 容器构建已在 GitHub Actions 通过；保留策略容器也纳入 CI。全新 VPS、签名、后台推送与真实蜂窝功能仍须分别验收。
