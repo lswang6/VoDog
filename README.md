@@ -92,3 +92,9 @@ The macOS component is source-available under noncommercial terms. Its optional 
 [Pixel setup walkthrough](docs/pixel-setup.md) · [DJI setup walkthrough](docs/dji-setup.md) · [Host installer](infra/README.md)
 
 [Release checks and remaining limits](docs/release-checks.md)
+
+## Acknowledgments
+
+Thanks to [CellDock](https://github.com/celldock/celldock-for-mac) authors and contributors for the macOS/DJI integration foundation, including its design acknowledgment of [MaVo / moluncn](https://github.com/moluncn/mavo). Thanks also to chenxiaolong for BCP/BCR and the authors of Magisk, Shizuku, Opus, WebRTC, Pion, and other dependencies. See [CONTRIBUTORS.md](CONTRIBUTORS.md) and [third-party attribution](docs/attribution.md) for authors, sources, and relationships.
+
+[Audio compression and transport: methods and source map](docs/audio-transport.md)

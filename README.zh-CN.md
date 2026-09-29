@@ -80,3 +80,9 @@ macOS 部分以非商业条款提供源码，其可选语音内核二进制因�
 [Pixel 设置教程](docs/pixel-setup.zh-CN.md) · [DJI 设置教程](docs/dji-setup.zh-CN.md) · [主机安装工具](infra/README.md)
 
 [发行检查与剩余限制](docs/release-checks.md)
+
+## 致谢
+
+感谢 [CellDock](https://github.com/celldock/celldock-for-mac) 作者与贡献者提供 macOS/DJI 集成基础，并保留其对 [MaVo / moluncn](https://github.com/moluncn/mavo) 的设计致谢。感谢 chenxiaolong 的 BCP/BCR，以及 Magisk、Shizuku、Opus、WebRTC、Pion 等上游作者。完整名单、来源和使用关系见 [CONTRIBUTORS.md](CONTRIBUTORS.md) 与 [第三方署名](docs/attribution.zh-CN.md)。
+
+[语音压缩与传输：方法及源码位置](docs/audio-transport.zh-CN.md)

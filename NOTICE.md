@@ -23,3 +23,5 @@ licenses, copyright notices, or restrictions attached to third-party components.
 
 Names such as Pixel, Android, DJI, Apple, Magisk and CellDock identify compatibility
 or upstream provenance. This project is not an official product of those vendors.
+
+[Contributors and upstream acknowledgments / 贡献者与上游致谢](CONTRIBUTORS.md)

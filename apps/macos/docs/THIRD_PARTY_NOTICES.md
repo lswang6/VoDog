@@ -1,8 +1,12 @@
 # Third-party notices
 
-The macOS application and its user-space PCM bridge were written independently.
+This macOS application is derived from CellDock, whose authors and contributors
+retain their original attribution and license. CellDock also credits MaVo by
+moluncn for interface and feature design. See the root
+[contributors and upstream acknowledgments](../../../CONTRIBUTORS.md).
+
 The following projects were consulted for protocol behavior and test strategy;
-their source code is not copied into those components:
+their source code is not copied into the application or user-space PCM bridge:
 
 - asterisk-chan-quectel, GPL-2.0 (protocol behavior only; no source vendored):
   <https://github.com/IchthysMaranatha/asterisk-chan-quectel>

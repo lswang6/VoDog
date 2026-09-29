@@ -14,6 +14,8 @@ Start with support and hardware, then install and build. These guides describe s
 - [Security and privacy](security.md)
 - [Licenses and redistribution](licensing.md)
 - [Third-party attribution](attribution.md)
+- [Contributors and upstream authors](../CONTRIBUTORS.md)
+- [Audio compression and transport](audio-transport.md)
 
 Public examples use synthetic identities and example domains. Deployment evidence, secrets, real recordings, and operator history do not belong in this documentation tree.
 

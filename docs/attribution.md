@@ -19,3 +19,5 @@ VoDog retains third-party authorship separately from its product branding. Prese
 | xAI, Doubao, Gemini and OpenAI-compatible APIs | External service integrations; credentials and provider terms are separate |
 
 Read the root license, the macOS component's retained license, lockfiles/manifests, and vendored notices for exact scope. Excluded module voice binaries are not supplied or covered by a new permission grant. No contributor identity is removed merely because an application name or endpoint is neutralized.
+
+[Contributors and upstream acknowledgments / 贡献者与上游致谢](../CONTRIBUTORS.md)

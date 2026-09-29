@@ -19,3 +19,5 @@ VoDog 将第三方作者署名与产品品牌分开保留。组件、依赖包�
 | xAI、豆包、Gemini 与 OpenAI 兼容 API | 外部服务集成，凭据与供应商条款独立 |
 
 准确范围以根许可、macOS 保留许可、锁文件/manifest 和 vendor 声明为准。已排除的模组语音二进制没有随附，也不存在新增许可授权。应用改名或端点脱敏不是删除贡献者身份的理由。
+
+[Contributors and upstream acknowledgments / 贡献者与上游致谢](../CONTRIBUTORS.md)
