@@ -51,9 +51,9 @@ android {
         applicationId = "org.vodog.gateway"
         minSdk = 29
         targetSdk = 36
-        versionCode = 32
-        versionName = if (cellularAcceptance == "true") "0.9.9-s86-cellular-acceptance"
-        else "0.9.9-s86"
+        versionCode = 33
+        versionName = if (cellularAcceptance == "true") "0.10.0-s94-cellular-acceptance"
+        else "0.10.0-s94"
         buildConfigField("boolean", "CELLULAR_ACCEPTANCE_ENABLED", cellularAcceptance)
         buildConfigField("boolean", "RECORDING_ARCHIVE_ENABLED", recordingArchive)
         buildConfigField("long", "RECORDING_ARCHIVE_MIN_FREE_BYTES", "${recordingArchiveMinFreeBytes}L")
