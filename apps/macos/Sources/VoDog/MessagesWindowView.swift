@@ -77,19 +77,23 @@ struct MessagesWindowView: View {
     private var conversationSidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                TextField(L10n.tr("搜索联系人、号码或短信"), text: $searchText)
-                    .communicationSearchField()
-
-                CommunicationIconActionButton(
-                    systemImage: "square.and.pencil",
-                    accessibilityLabel: L10n.tr("新短信"),
-                    action: beginNewMessage
-                )
+                Text(L10n.tr("短信")).font(.headline)
+                Spacer(minLength: 6)
+                moduleMenu
+                Button(action: beginNewMessage) {
+                    Image(systemName: "square.and.pencil").frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.tr("新短信"))
+                .accessibilityLabel(L10n.tr("新短信"))
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            .signalToolbar()
 
-            Divider()
+            TextField(L10n.tr("搜索联系人、号码或短信"), text: $searchText)
+                .communicationSearchField()
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
 
             List {
                 if filteredConversations.isEmpty {
@@ -143,7 +147,38 @@ struct MessagesWindowView: View {
             }
         }
         .communicationSidebarColumnStyle()
-        .communicationModuleFloatingSidebar()
+    }
+
+    /// Toolbar line popup: the module used for sending (same choice as the module status card).
+    private var moduleMenu: some View {
+        Menu {
+            ForEach(appState.cellularModules) { module in
+                Button {
+                    appState.selectCommunicationModule(module.id)
+                } label: {
+                    Text(verbatim: [appState.lineName(for: module.id), module.localizedDisplayName,
+                                    AiBadge.menuSuffix(appState.accountSIM(for: module.id)?.settings)]
+                        .compactMap { $0 }.joined(separator: " · "))
+                }
+                .disabled(!module.isCommunicationEligible)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                LineBlock(color: appState.lineColor(for: appState.currentCommunicationModuleID), size: 8)
+                Text(verbatim: appState.currentCommunicationModule.map {
+                    appState.lineName(for: $0.id) ?? $0.localizedDisplayName
+                } ?? L10n.tr("没有可用模组"))
+                .lineLimit(1)
+                AiBadge(settings: appState.accountSIM(for: appState.currentCommunicationModuleID)?.settings)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(Signal.surface2, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .disabled(appState.cellularModules.isEmpty)
+        .help(L10n.tr("短信和拨号使用所选模组"))
     }
 
     private var conversations: [MessageConversation] {
@@ -244,6 +279,7 @@ struct MessagesWindowView: View {
 
 private struct ConversationRow: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.signalRowSelected) private var rowSelected
     let conversation: MessageConversation
     let displayName: String?
 
@@ -274,7 +310,7 @@ private struct ConversationRow: View {
                     if let moduleName {
                         Text(verbatim: moduleName)
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.secondary)
                     }
                     if conversation.latestMessage?.isOutgoing == true {
                         Image(systemName: "arrowshape.turn.up.right.fill")
@@ -289,10 +325,10 @@ private struct ConversationRow: View {
                     if conversation.unreadCount > 0 {
                         Text("\(conversation.unreadCount)")
                             .font(.caption2.bold())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(rowSelected ? Signal.brand : .white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.accentColor, in: Capsule())
+                            .background(rowSelected ? Color.white : Signal.dangerFill, in: Capsule())
                     }
                 }
             }
@@ -323,47 +359,61 @@ private struct MessageThreadView: View {
     var body: some View {
         VStack(spacing: 0) {
             threadHeader
-            Divider()
             messageHistory
-            Divider()
+            Divider().overlay(Signal.line)
             composer
         }
     }
 
     private var threadHeader: some View {
-        HStack(spacing: 12) {
-            MessageConversationAvatar(
-                title: presentedIdentity,
-                address: conversation.address,
-                size: 38
-            )
-
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: presentedIdentity)
                     .font(.headline)
-                if contactName != nil {
-                    Text(verbatim: CommunicationUI.displayText(conversation.address))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+                    .lineLimit(1)
+                Text(verbatim: sourceLine)
+                    .font(.caption)
+                    .foregroundStyle(Signal.ink3)
+                    .lineLimit(1)
             }
             Spacer()
             if SMSPDUEncoder.isValidDestination(conversation.address) {
                 Button {
                     CommunicationWindowController.shared.showPhone(number: conversation.address)
                 } label: {
-                    Image(systemName: "phone.fill")
-                        .frame(width: 16, height: 16)
+                    Image(systemName: "phone").frame(width: 28, height: 28)
                 }
-                .adaptiveGlassButton()
-                .buttonBorderShape(.circle)
-                .controlSize(.small)
+                .buttonStyle(.borderless)
                 .help(L10n.tr("呼叫 %@", presentedIdentity))
                 .accessibilityLabel(L10n.tr("呼叫 %@", presentedIdentity))
             }
+            Menu {
+                Button(L10n.tr("复制")) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(conversation.address, forType: .string)
+                }
+                Button(L10n.tr("全部标为已读")) {
+                    appState.markRead(conversation.messages.filter { !$0.isOutgoing && !$0.isRead })
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(L10n.tr("更多"))
+            .accessibilityLabel(L10n.tr("更多"))
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 6)
+        .signalToolbar()
+    }
+
+    /// 「号码 · 通过 X 接收」: the number when a contact name is shown, and the receiving module.
+    private var sourceLine: String {
+        let module = conversation.moduleID.flatMap { id in appState.cellularModules.first { $0.id == id } }
+        let via = module.map { L10n.tr("通过 %@ 接收", appState.lineName(for: $0.id) ?? $0.localizedDisplayName) }
+        return [contactName != nil ? CommunicationUI.displayText(conversation.address) : nil, via]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     private var messageHistory: some View {
@@ -459,13 +509,11 @@ private struct MessageThreadView: View {
                     .textFieldStyle(.plain)
                     .lineLimit(1 ... 5)
                     .focused($composerFocused)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .adaptiveGlassSurface(
-                        cornerRadius: 17,
-                        treatment: .clear,
-                        isInteractive: true
-                    )
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(Signal.line, lineWidth: 1)
+                    }
 
                 Button(action: send) {
                     Group {
@@ -476,11 +524,14 @@ private struct MessageThreadView: View {
                             Image(systemName: "arrow.up")
                         }
                     }
-                    .frame(width: 18, height: 18)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Signal.onBrand)
+                    .frame(width: 34, height: 34)
+                    .background(Signal.brand, in: Circle())
+                    .opacity(canSend ? 1 : 0.45)
                 }
-                .adaptiveGlassButton(.accented)
-                .buttonBorderShape(.circle)
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.tr("发送"))
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(!canSend)
                 .help(appState.moduleHasCall(nil) ? L10n.tr("当前模组通话期间会保存草稿，但不能发送短信") : L10n.tr("发送（⌘Return）"))
@@ -551,21 +602,13 @@ private struct MessageBubble: View {
             if message.isOutgoing { Spacer(minLength: 70) }
 
             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
-                if let code = message.verificationCode, !message.isOutgoing {
-                    Text(verbatim: L10n.tr("验证码 %@", code))
-                        .font(.caption.weight(.semibold))
-                }
-
                 Text(verbatim: (message.body.isEmpty ? L10n.tr("（空短信）") : message.body))
                     .textSelection(.enabled)
-                    .padding(.leading, message.isOutgoing ? 13 : 19)
-                    .padding(.trailing, message.isOutgoing ? 19 : 13)
-                    .padding(.vertical, 9)
-                    .background(
-                        message.isOutgoing ? Color.accentColor : Color.secondary.opacity(0.14),
-                        in: MessageBubbleShape(isOutgoing: message.isOutgoing)
-                    )
-                    .foregroundStyle(message.isOutgoing ? Color.white : Color.primary)
+                    .signalBubble(outgoing: message.isOutgoing)
+
+                if let code = message.verificationCode, !message.isOutgoing {
+                    CopyCodeButton(code: code)
+                }
 
                 if message.isOutgoing {
                     Label {
@@ -617,90 +660,7 @@ private struct MessageBubble: View {
     }
 }
 
-private struct MessageBubbleShape: Shape {
-    let isOutgoing: Bool
-
-    func path(in rect: CGRect) -> Path {
-        let tailWidth: CGFloat = 7
-        let radius = min(17, rect.height / 2, rect.width / 2)
-        let bodyRect = CGRect(
-            x: isOutgoing ? rect.minX : rect.minX + tailWidth,
-            y: rect.minY,
-            width: max(0, rect.width - tailWidth),
-            height: rect.height
-        )
-        let tailHeight = min(13, max(7, rect.height * 0.34))
-        let tailBaseWidth = min(14, max(8, radius * 0.82))
-        var path = Path(roundedRect: bodyRect, cornerRadius: radius)
-
-        if isOutgoing {
-            let upperJoin = CGPoint(
-                x: bodyRect.maxX - 1,
-                y: bodyRect.maxY - tailHeight
-            )
-            let tip = CGPoint(x: rect.maxX, y: rect.maxY - 1)
-            let lowerJoin = CGPoint(
-                x: bodyRect.maxX - tailBaseWidth,
-                y: bodyRect.maxY - 1
-            )
-
-            path.move(to: upperJoin)
-            path.addCurve(
-                to: tip,
-                control1: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - tailHeight * 0.45),
-                control2: CGPoint(x: rect.maxX - 1, y: rect.maxY - 3)
-            )
-            path.addCurve(
-                to: lowerJoin,
-                control1: CGPoint(x: rect.maxX - 4, y: rect.maxY),
-                control2: CGPoint(x: bodyRect.maxX - tailBaseWidth * 0.45, y: bodyRect.maxY)
-            )
-            path.addCurve(
-                to: upperJoin,
-                control1: CGPoint(
-                    x: bodyRect.maxX - tailBaseWidth * 0.45,
-                    y: bodyRect.maxY - tailHeight * 0.15
-                ),
-                control2: CGPoint(x: bodyRect.maxX - 2, y: bodyRect.maxY - tailHeight * 0.55)
-            )
-            path.closeSubpath()
-        } else {
-            let upperJoin = CGPoint(
-                x: bodyRect.minX + 1,
-                y: bodyRect.maxY - tailHeight
-            )
-            let lowerJoin = CGPoint(
-                x: bodyRect.minX + tailBaseWidth,
-                y: bodyRect.maxY - 1
-            )
-            let tip = CGPoint(x: rect.minX, y: rect.maxY - 1)
-
-            path.move(to: upperJoin)
-            path.addCurve(
-                to: lowerJoin,
-                control1: CGPoint(x: bodyRect.minX + 2, y: bodyRect.maxY - tailHeight * 0.55),
-                control2: CGPoint(
-                    x: bodyRect.minX + tailBaseWidth * 0.45,
-                    y: bodyRect.maxY - tailHeight * 0.15
-                )
-            )
-            path.addCurve(
-                to: tip,
-                control1: CGPoint(x: bodyRect.minX + tailBaseWidth * 0.45, y: bodyRect.maxY),
-                control2: CGPoint(x: rect.minX + 4, y: rect.maxY)
-            )
-            path.addCurve(
-                to: upperJoin,
-                control1: CGPoint(x: rect.minX + 1, y: rect.maxY - 3),
-                control2: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - tailHeight * 0.45)
-            )
-            path.closeSubpath()
-        }
-        return path
-    }
-}
-
-private struct MessageConversationAvatar: View {
+struct MessageConversationAvatar: View {
     let title: String
     let address: String
     let size: CGFloat
@@ -708,11 +668,11 @@ private struct MessageConversationAvatar: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(color.opacity(0.14))
+                .fill(Signal.surface3)
 
             Text(verbatim: initial)
-                .font(.system(size: size * 0.44, weight: .semibold, design: .rounded))
-                .foregroundStyle(color)
+                .font(.system(size: size * 0.4, weight: .semibold))
+                .foregroundStyle(Signal.ink2)
                 .minimumScaleFactor(0.8)
         }
         .frame(width: size, height: size)
@@ -721,20 +681,6 @@ private struct MessageConversationAvatar: View {
 
     private var initial: String {
         title.first.map(String.init) ?? "?"
-    }
-
-    private var color: Color {
-        let palette: [Color] = [
-            .blue, .indigo, .purple, .pink,
-            .orange, .teal, .cyan, .mint,
-        ]
-        let identity = PhoneNumberNormalizer.conversationID(for: address)
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in identity.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return palette[Int(hash % UInt64(palette.count))]
     }
 }
 

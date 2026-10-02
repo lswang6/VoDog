@@ -16,6 +16,7 @@
 - [第三方署名](attribution.zh-CN.md)
 - [贡献者与上游作者](../CONTRIBUTORS.md)
 - [语音压缩与传输](audio-transport.zh-CN.md)
+- [Signal 界面系统](design/signal/README.zh-CN.md)
 
 公开示例使用合成身份与示例域名。部署证据、凭据、真实录音和运维历史不进入此文档目录。
 

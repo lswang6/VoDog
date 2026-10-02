@@ -79,7 +79,8 @@ final class CallIslandWindowController: NSObject, NSWindowDelegate {
 
         let size = CallIslandView.contentSize(
             for: appState.call.phase,
-            isExpanded: presentation.isExpanded
+            isExpanded: presentation.isExpanded,
+            showsAITimeout: CallIslandView.aiTimeoutSeconds(appState) != nil
         )
         let hostingView = CallIslandHostingView(rootView: rootView)
         hostingView.frame = NSRect(origin: .zero, size: size)
@@ -116,7 +117,8 @@ final class CallIslandWindowController: NSObject, NSWindowDelegate {
         guard let appState, let panel else { return }
         let targetSize = CallIslandView.contentSize(
             for: appState.call.phase,
-            isExpanded: presentation.isExpanded
+            isExpanded: presentation.isExpanded,
+            showsAITimeout: CallIslandView.aiTimeoutSeconds(appState) != nil
         )
         guard panel.frame.size != targetSize else { return }
 
@@ -186,14 +188,17 @@ private struct CallIslandView: View {
     @ObservedObject private var recordings = CallRecordingStore.shared
     @AppStorage("CallRecordingConsentAcknowledged.v1") private var recordingConsent = false
     @State private var showingRecordingConsent = false
+    /// Local timestamp of the moment this call started ringing here (AI countdown base only).
+    @State private var ringStartedAt: Date?
 
     let onOpenFullCall: () -> Void
     let onLayoutChange: () -> Void
 
-    static func contentSize(for phase: CallPhase, isExpanded: Bool) -> NSSize {
+    static func contentSize(for phase: CallPhase, isExpanded: Bool, showsAITimeout: Bool) -> NSSize {
         switch phase {
         case .incoming:
-            return NSSize(width: 390, height: 108)
+            // Sized to content: the AI countdown strip adds a row; no transparent dead zone without it.
+            return NSSize(width: 420, height: showsAITimeout ? 190 : 116)
         case .active where isExpanded:
             return NSSize(width: 430, height: 176)
         default:
@@ -217,21 +222,18 @@ private struct CallIslandView: View {
             }
         }
         .frame(
-            width: Self.contentSize(
-                for: appState.call.phase,
-                isExpanded: presentation.isExpanded
-            ).width,
-            height: Self.contentSize(
-                for: appState.call.phase,
-                isExpanded: presentation.isExpanded
-            ).height
+            width: currentSize.width,
+            height: currentSize.height
         )
         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: presentation.isExpanded)
         .onChange(of: appState.call.phase) { _, phase in
             if phase != .active { presentation.isExpanded = false }
+            ringStartedAt = phase == .incoming ? Date() : nil
             onLayoutChange()
         }
+        .onAppear { if appState.call.phase == .incoming, ringStartedAt == nil { ringStartedAt = Date() } }
         .onChange(of: presentation.isExpanded) { _, _ in onLayoutChange() }
+        .onChange(of: aiTimeoutSeconds) { _, _ in onLayoutChange() }
         .alert(L10n.tr("开始通话录音？"), isPresented: $showingRecordingConsent) {
             Button(L10n.tr("取消"), role: .cancel) {}
             Button(L10n.tr("同意并开始")) {
@@ -244,42 +246,150 @@ private struct CallIslandView: View {
     }
 
     private var incomingContent: some View {
-        HStack(spacing: 12) {
-            callerButton
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                Button(action: onOpenFullCall) {
+                    HStack(spacing: 14) {
+                        Image(systemName: "person")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(Signal.ink2)
+                            .frame(width: 52, height: 52)
+                            .background(Signal.surface3, in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(L10n.tr("来电")) + Text(verbatim: " ·")
+                                LineBlock(color: appState.lineColor(for: appState.call.moduleID), size: 8)
+                                Text(verbatim: incomingLineName)
+                                AiBadge(settings: (ringingSIM ?? appState.accountSIM(for: appState.call.moduleID))?.settings)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(Signal.ink3)
+                            .lineLimit(1)
+                            Text(verbatim: displayName)
+                                .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(Signal.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            Text(verbatim: incomingSecondaryLine)
+                                .font(.callout)
+                                .foregroundStyle(Signal.ink3)
+                                .lineLimit(1)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L10n.tr("打开完整通话页面"))
 
-            Spacer(minLength: 4)
+                Spacer(minLength: 4)
 
-            // Signed in, 接听 claims the call through VoDog (AppState.answerCall).
-            if appState.gateway.handlesCalls(on: appState.call.moduleID), appState.voDog.user == nil {
-                Text(L10n.tr("请在 VoDog 客户端接听"))
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            } else {
-                AdaptiveGlassContainer(spacing: 10) {
+                // Signed in, 接听 claims the call through VoDog (AppState.answerCall).
+                if appState.gateway.handlesCalls(on: appState.call.moduleID), appState.voDog.user == nil {
+                    Text(L10n.tr("请在 VoDog 客户端接听"))
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Signal.ink3)
+                } else {
                     HStack(spacing: 10) {
-                        islandActionButton(
-                            title: L10n.tr("拒接"),
-                            systemImage: "phone.down.fill",
-                            tint: .red,
-                            isProminent: true,
-                            isEnabled: !appState.isChangingCall,
-                            action: appState.hangUp
-                        )
-                        islandActionButton(
-                            title: L10n.tr("接听"),
-                            systemImage: "phone.fill",
-                            tint: .green,
-                            isProminent: true,
-                            isEnabled: canAnswer,
-                            action: appState.answerCall
-                        )
+                        incomingButton(title: L10n.tr("拒接"), systemImage: "phone.down.fill", fill: Signal.dangerFill,
+                                       isEnabled: !appState.isChangingCall, action: appState.hangUp)
+                        incomingButton(title: L10n.tr("接听"), systemImage: "phone.fill", fill: Signal.callFill,
+                                       isEnabled: canAnswer, action: appState.answerCall)
                     }
                 }
             }
+
+            if let timeout = aiTimeoutSeconds, let ringStartedAt {
+                TimelineView(.periodic(from: ringStartedAt, by: 1)) { context in
+                    let elapsed = context.date.timeIntervalSince(ringStartedAt)
+                    let remaining = max(0, Int((Double(timeout) - elapsed).rounded(.up)))
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkle")
+                        Text(L10n.tr("无人接听，%lld 秒后由 AI 代接", Int64(remaining)))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        ProgressView(value: min(1, max(0, elapsed / Double(timeout))))
+                            .progressViewStyle(.linear)
+                            .tint(Signal.ai)
+                            .frame(width: 90)
+                            .accessibilityHidden(true)
+                    }
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Signal.ai)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Signal.aiSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
         }
-        .padding(14)
-        .callIslandSurface(cornerRadius: 34)
-        .padding(6)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .top)
+        .background(Signal.chrome, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Signal.line, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        .padding(10)
+    }
+
+    private func incomingButton(
+        title: String,
+        systemImage: String,
+        fill: Color,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(fill, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.46)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+
+    /// The account SIM this ring belongs to (gateway ring), else the module's line name / module name.
+    private var ringingSIM: VoDogSIM? {
+        guard let simID = appState.gateway.ringingCall(on: appState.call.moduleID)?.simId else { return nil }
+        return appState.voDog.sims.first { $0.id == simID }
+    }
+
+    private var incomingLineName: String {
+        if let sim = ringingSIM { return sim.displayName }
+        let moduleID = appState.call.moduleID
+        return appState.lineName(for: moduleID)
+            ?? appState.cellularModules.first { $0.id == moduleID }?.localizedDisplayName
+            ?? L10n.tr("蜂窝来电")
+    }
+
+    /// Number under a contact name, else 「不在通讯录」 (no location data exists).
+    private var incomingSecondaryLine: String {
+        contacts.displayName(for: callNumber) == nil ? L10n.tr("不在通讯录") : callNumber
+    }
+
+    private var currentSize: NSSize {
+        Self.contentSize(for: appState.call.phase, isExpanded: presentation.isExpanded,
+                         showsAITimeout: aiTimeoutSeconds != nil)
+    }
+
+    private var aiTimeoutSeconds: Int? { Self.aiTimeoutSeconds(appState) }
+
+    /// Only while ringing, when the signed-in SIM's existing setting is 无人接听再交给 AI with a known timeout.
+    @MainActor
+    static func aiTimeoutSeconds(_ appState: AppState) -> Int? {
+        guard appState.call.phase == .incoming,
+              let simID = appState.gateway.ringingCall(on: appState.call.moduleID)?.simId,
+              let settings = appState.voDog.sims.first(where: { $0.id == simID })?.settings,
+              settings.mode == VoDogReceptionMode.timeoutAI.rawValue,
+              settings.timeoutSeconds > 0 else { return nil }
+        return settings.timeoutSeconds
     }
 
     private var compactActiveContent: some View {

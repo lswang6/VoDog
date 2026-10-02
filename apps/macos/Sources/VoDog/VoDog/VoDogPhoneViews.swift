@@ -40,18 +40,19 @@ extension Color {
 
 /// Red capsule, white text, hidden at 0, `99+` above 99; VoiceOver reads 「N 条未读」.
 struct VoDogCountBadge: View {
+    @Environment(\.signalRowSelected) private var rowSelected
     let count: Int
 
     var body: some View {
         if let text = VoDogBadges.text(count) {
             Text(text)
                 .font(.caption2.weight(.bold).monospacedDigit())
-                .foregroundStyle(.white)
+                .foregroundStyle(rowSelected ? Signal.brand : .white)
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.horizontal, 5)
                 .frame(minWidth: 16, minHeight: 16)
-                .background(Color.red, in: Capsule())
+                .background(rowSelected ? Color.white : Signal.dangerFill, in: Capsule())
                 .accessibilityLabel(L10n.tr("%lld 条未读", Int64(count)))
         }
     }
@@ -72,7 +73,7 @@ struct VoDogUnreadDot: View {
     let visible: Bool
 
     var body: some View {
-        Circle().fill(Color.accentColor)
+        Circle().selectionTint(Signal.brand)
             .frame(width: 8, height: 8)
             .opacity(visible ? 1 : 0)
             .frame(width: 10)
@@ -99,21 +100,82 @@ struct VoDogRailBadge: View {
     }
 }
 
-/// 人工 / AI answer-mode tag; text, not color, carries the meaning.
-struct VoDogAnswerModeBadge: View {
-    let mode: String?
+private struct VoDogSIMRefreshModifier: ViewModifier {
+    @ObservedObject var account: VoDogAccount
+    @Binding var selection: String?
+
+    func body(content: Content) -> some View {
+        content.task {
+            // ponytail: plain 5 s poll while the picker is on screen, same as the 号码与接听 page.
+            while !Task.isCancelled, account.user != nil {
+                await account.refreshSIMs()
+                // Write only to repair a missing/unknown SIM: this long-lived task holds a stale copy of
+                // `selection`, so an unconditional write would undo the user's latest tap every 5 s.
+                let preferred = VoDogPhonePolicy.preferredSIM(account.sims, current: selection)
+                if preferred != selection { selection = preferred }
+                await VoDogPollCadence.sleep()
+            }
+        }
+    }
+}
+
+extension View {
+    func voDogSIMRefresh(account: VoDogAccount, selection: Binding<String?>) -> some View {
+        modifier(VoDogSIMRefreshModifier(account: account, selection: selection))
+    }
+}
+
+/// macOS toolbar line popup (spec 01 §5 线路选择): line block + name, online SIMs first; same refresh as the strip.
+struct VoDogSIMMenu: View {
+    @ObservedObject var account: VoDogAccount
+    @Binding var selection: String?
+
+    private var fresh: Bool { account.simsError == nil }
 
     var body: some View {
-        if let key = VoDogPhonePolicy.answerModeBadge(mode) {
-            Text(L10n.tr(key))
-                .font(.caption2.weight(.semibold))
-                .lineLimit(1)
-                .fixedSize()
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .overlay(Capsule().strokeBorder(lineWidth: 1).opacity(0.5))
-                .accessibilityLabel(L10n.tr("接听方式：%@", L10n.tr(key)))
+        HStack(spacing: 6) {
+            if let error = account.simsError {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Signal.warn)
+                    .help(error)
+                    .accessibilityLabel(error)
+            }
+            Menu {
+                ForEach(VoDogPhonePolicy.displayOrder(account.sims, fresh: fresh)) { sim in
+                    Toggle(isOn: Binding(get: { selection == sim.id }, set: { if $0 { selection = sim.id } })) {
+                        Text(verbatim: [sim.displayName, sim.phoneLabel, status(sim), AiBadge.menuSuffix(sim.settings)]
+                            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if let sim = account.sims.first(where: { $0.id == selection }) {
+                        LineBlock(color: color(sim), size: 8)
+                        Text(verbatim: sim.displayName).lineLimit(1)
+                        AiBadge(settings: sim.settings)
+                        LineStatusShape(status: VoDogPhonePolicy.showsOnline(sim, fresh: fresh) ? .online : .offline)
+                    } else {
+                        Text(account.simsLoaded ? L10n.tr("没有已分配的 SIM") : L10n.tr("正在读取号码…")).lineLimit(1)
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(Signal.surface2, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .disabled(account.sims.isEmpty)
         }
+        .voDogSIMRefresh(account: account, selection: $selection)
+    }
+
+    private func color(_ sim: VoDogSIM) -> Color {
+        .voDogSIM(rank: VoDogPhonePolicy.colorRank(of: sim.id, in: account.sims))
+    }
+
+    private func status(_ sim: VoDogSIM) -> String {
+        !fresh ? L10n.tr("号码状态待刷新")
+            : VoDogPhonePolicy.showsOnline(sim, fresh: fresh) ? L10n.tr("在线") : L10n.tr("号码设备离线")
     }
 }
 
@@ -146,17 +208,7 @@ struct VoDogSIMStrip: View {
             .padding(.vertical, 8)
         }
         .scrollIndicators(.never)
-        .task {
-            // ponytail: plain 5 s poll while the strip is on screen, same as the 号码与接听 page.
-            while !Task.isCancelled, account.user != nil {
-                await account.refreshSIMs()
-                // Write only to repair a missing/unknown SIM: this long-lived task holds a stale copy of
-                // `selection`, so an unconditional write would undo the user's latest tap every 5 s.
-                let preferred = VoDogPhonePolicy.preferredSIM(account.sims, current: selection)
-                if preferred != selection { selection = preferred }
-                await VoDogPollCadence.sleep()
-            }
-        }
+        .voDogSIMRefresh(account: account, selection: $selection)
     }
 
     private func chip(_ sim: VoDogSIM) -> some View {
@@ -173,7 +225,7 @@ struct VoDogSIMStrip: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(selected ? Color.voDogOnSIM : color)
                             .lineLimit(1)
-                        VoDogAnswerModeBadge(mode: sim.settings?.mode)
+                        AiBadge(settings: sim.settings)
                     }
                     Text([sim.phoneLabel, status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption)

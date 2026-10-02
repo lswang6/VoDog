@@ -121,9 +121,10 @@ test('通话记录 renders the same rows, pages through the server and keeps 每
     assert.deepEqual(historyPaths(paths), ['/calls?page=1&pageSize=50&includeBlocked=true&simId=sim-1']);
     assert.equal(rows(renderer!).length, 2);
     const tree = collectText(renderer!.toJSON());
-    assert.match(tree, /2025550117 · 张三/, 'the row keeps 号码 · 姓名 from S21 §F');
-    assert.match(tree, /呼入 · 已结束/);
-    assert.match(tree, /通话时长 48 秒/);
+    // S95 row: the contact name is the title and the number leads the second line (both stay visible).
+    const first = rows(renderer!)[0]!;
+    assert.equal(collectText(first.findByType('strong')), '张三');
+    assert.match(collectText(first), /2025550117呼入 · 已结束 · 48 秒/);
     assert.match(tree, /第 1 \/ 3 页 · 共 137 条/);
 
     await act(async () => {
@@ -295,6 +296,7 @@ test('a call row is reachable from the keyboard and Enter opens its contact card
     const row=rows(renderer!)[0]!;
     assert.equal(row.props.tabIndex,0);
     assert.match(row.props['aria-label'],/按回车打开联系人卡片/);
+    assert.match(row.props['aria-label'],/2025550117 · 张三/,'the accessible name keeps 号码 · 姓名 from S21 §F');
     let prevented=false;
     await act(async()=>row.props.onKeyDown({key:'Enter',target:row,currentTarget:row,preventDefault:()=>{prevented=true;}}));
     assert.equal(prevented,true);
@@ -376,6 +378,7 @@ test('S58: row owner shows platform labels, never raw ids',async()=>{
  assert.equal(callRowOwner({...base,originatingPlatform:'macos'}),'Mac 端');
  assert.equal(callRowOwner({...base,direction:'incoming',answeredByPlatform:'ios'}),'iPhone 端');
  assert.equal(callRowOwner({...base,originatingPlatform:'pixel',gatewayKind:'dji4g'}),'通过 DJI 4G 模组拨打');
+ assert.equal(callRowOwner({...base,originatingPlatform:'some_new_platform'}),undefined,'S95b §C: an unknown platform id is not shown raw');
 });
 
 test('a background reload leaves the pager usable, and AI 对话 is an on-demand toggle only on AI-answered rows', async () => {
@@ -480,4 +483,63 @@ test('S81：未接听的振铃行显示被叫 SIM，DTO simLabel 优先，其次
   assert.match(await simText(ring,sims),/^家庭卡 · /);
   assert.match(await simText(ring,[{...sims[0]!,label:''}]),/^2025550116 · /);
   assert.equal(await simText({...ring,simLabel:'工作卡'},[]),'工作卡','SIM 列表未加载时仍显示 DTO simLabel');
+});
+
+test('S95：记录按网关时区分组为 今天 / 昨天 / 本周 / 日期，方向图标只看现有字段',async()=>{
+  const {callDateGroup,callDirectionKind,relativeCallTime}=await load<typeof import('../src/call-history-panel.tsx')>('/src/call-history-panel.tsx');
+  const now=new Date('2026-09-17T04:00:00.000Z'); // 周四 12:00 Asia/Shanghai
+  const zone='Asia/Shanghai';
+  assert.equal(callDateGroup('2026-09-16T16:30:00.000Z',zone,now),'今天','00:30 local is already today');
+  assert.equal(callDateGroup('2026-09-16T15:30:00.000Z',zone,now),'昨天');
+  assert.equal(callDateGroup('2026-09-14T02:00:00.000Z',zone,now),'本周','周一 belongs to this week');
+  assert.equal(callDateGroup('2026-09-13T02:00:00.000Z',zone,now),'9月13日','周日 is last week');
+  assert.equal(callDateGroup('2025-12-31T02:00:00.000Z',zone,now),'2025年12月31日');
+  assert.equal(relativeCallTime('2026-09-17T01:05:00.000Z',zone,now),'今天 09:05');
+  assert.equal(relativeCallTime('2026-09-16T12:16:00.000Z',zone,now),'昨天 20:16');
+  assert.equal(relativeCallTime('2026-09-15T02:21:00.000Z',zone,now),'周二 10:21');
+  assert.equal(relativeCallTime('2026-09-13T02:00:00.000Z',zone,now),'9/13');
+  const base=calls[0]!;
+  assert.equal(callDirectionKind(base),'incoming');
+  assert.equal(callDirectionKind(calls[1]!),'outgoing');
+  assert.equal(callDirectionKind({...base,answeredAt:undefined}),'missed');
+  assert.equal(callDirectionKind({...base,answeredByPlatform:'ai'}),'ai');
+  assert.equal(callDirectionKind({...base,state:'failed',failureReason:'number_blocked',answeredAt:undefined}),'blocked');
+  assert.equal(callDirectionKind({...base,blocked:true}),'incoming','a number blocked later keeps the direction icon');
+  assert.equal(callDirectionKind({...calls[1]!,state:'failed'}),'outgoing','a failed call is not a blocked call');
+});
+
+test('S95 宽屏：列表行不挂录音/转录，选中后详情面板打开，并只在详情里拉取 AI 对话',async()=>{
+  const {CallHistoryPanel}=await load<typeof import('../src/call-history-panel.tsx')>('/src/call-history-panel.tsx');
+  const priorFetch=globalThis.fetch;globalThis.fetch=async()=>new Response('{}',{status:404});
+  Object.defineProperty(globalThis,'matchMedia',{configurable:true,value:()=>({matches:true,addEventListener(){},removeEventListener(){}})});
+  let renderer:ReactTestRenderer|undefined;const paths:string[]=[];const opened:string[]=[];
+  try{
+    const id='33000000-0000-4000-8000-000000000001';
+    const aiCalls=[{...calls[0]!,id,answeredByPlatform:'ai'},calls[1]!];
+    await act(async()=>{renderer=create(React.createElement(CallHistoryPanel,{request:stub(paths,()=>({items:aiCalls,total:2,totalPages:1})),simId:'sim-1',sims,busy:false,onOpenCall:call=>opened.push(call.id)}));});
+    await act(async()=>{await flush();});
+    assert.equal(renderer!.root.findAll(node=>node.props?.className==='records-detail-pane').length,1);
+    assert.equal(renderer!.root.findAll(node=>node.props?.className==='record-media-actions').length,0,'rows carry no media sections in the wide layout');
+    assert.equal(renderer!.root.findAll(node=>node.type==='button'&&/AI 对话/.test(collectText(node))).length,0);
+    await act(async()=>{const row=rows(renderer!)[0]!;row.props.onKeyDown({key:'Enter',target:row,currentTarget:row,preventDefault(){}});await flush();});
+    assert.equal(rows(renderer!)[0]!.props['aria-current'],'true');
+    assert.deepEqual(opened,[id]);
+    assert.equal(renderer!.root.findAll(node=>node.type==='button'&&collectText(node)==='收起 AI 对话').length,1);
+    assert.ok(paths.includes(`/calls/${id}/ai-transcript`),'the detail pane opens the AI transcript on select');
+  }finally{
+    renderer?.unmount();
+    Reflect.deleteProperty(globalThis,'matchMedia');
+    globalThis.fetch=priorFetch;
+  }
+});
+
+test('S95b §C：未知状态不显示原始枚举',async()=>{
+  const {CallList}=await load<typeof import('../src/call-history-panel.tsx')>('/src/call-history-panel.tsx');
+  let renderer:ReactTestRenderer|undefined;
+  try{
+    await act(async()=>{renderer=create(React.createElement(CallList,{calls:[{...calls[1]!,state:'weird_internal_state'}],sims,busy:false}));});
+    const text=collectText(renderer!.toJSON());
+    assert.doesNotMatch(text,/weird_internal_state/);
+    assert.match(text,/呼出 · 状态待核实/);
+  }finally{renderer?.unmount();}
 });

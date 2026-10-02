@@ -68,11 +68,12 @@ struct CallsView<Content: View>: View {
     var body: some View {
         content(AnyView(callTab))
             .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 0) {
+                VStack(spacing: 8) {
                     NetworkAvailabilityNotice().padding(.horizontal)
                     if let payload = presentation.current { ongoingCallBanner(payload) }
                 }
-                .background(.bar)
+                .padding(.bottom, availability.reason != nil || presentation.current != nil ? 6 : 0)
+                .background(Signal.bg)
             }
             .fullScreenCover(item: Binding(
                 get: { presentation.presented },
@@ -152,11 +153,11 @@ struct CallsView<Content: View>: View {
                     .frame(maxWidth: 620)
                     .frame(maxWidth: .infinity)
                 }
-                .background(Color(uiColor: .systemGroupedBackground))
                 .contentShape(Rectangle())
                 .onTapGesture { showingKeypad = false }
                 .refreshable { await load(requiredIdentity: session.sessionIdentity) }
             }
+            .background(Signal.bg)
             .navigationTitle("电话")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
@@ -195,57 +196,82 @@ struct CallsView<Content: View>: View {
         )
     }
 
+    /// S95 collapsed call bar: one full-width 44 pt `callFill` line — ● name timer …… 返回通话 ›. Never wraps.
     private func ongoingCallBanner(_ payload: CallUIPayload) -> some View {
-        Button { presentation.restore() } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "phone.fill")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(ContactDisplay.numberWithName(number: payload.call.shownNumber(in: sims), contactName: payload.call.shownContactName))
-                        .font(.subheadline.weight(.semibold)).lineLimit(2)
-                    Text(simTitle(payload.call.simId, in: sims)).font(.caption)
-                    CallUIStatusLabel(call: payload.call, requestedAt: endRequests[payload.id]).font(.caption)
+        let call = payload.call
+        let requestedAt = endRequests[payload.id]
+        return Button { presentation.restore() } label: {
+            HStack(spacing: 10) {
+                Circle().fill(.white).frame(width: 8, height: 8).accessibilityHidden(true)
+                Text(ContactDisplay.title(number: call.shownNumber(in: sims), contactName: call.shownContactName))
+                    .font(.body.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                Group {
+                    if call.state == "active", requestedAt == nil, call.answeredAt != nil {
+                        CallElapsedTime(call: call, requestedAt: requestedAt, endingObservedAt: endingObservedAt[payload.id])
+                    } else {
+                        CallUIStatusLabel(call: call, requestedAt: requestedAt)
+                    }
                 }
+                .font(.body.weight(.semibold)).monospacedDigit().lineLimit(1).fixedSize()
                 Spacer(minLength: 8)
-                CallElapsedTime(call: payload.call, requestedAt: endRequests[payload.id], endingObservedAt: endingObservedAt[payload.id]).font(.subheadline)
-                Image(systemName: "chevron.up")
+                HStack(spacing: 4) {
+                    Text("返回通话")
+                    Image(systemName: "chevron.right").font(.footnote.weight(.bold))
+                }
+                .font(.subheadline.weight(.semibold)).lineLimit(1).fixedSize()
+                .padding(.horizontal, 12).frame(minHeight: 32)
+                .background(.white.opacity(0.18), in: Capsule())
             }
-            .frame(maxWidth: 620, minHeight: 44, alignment: .leading)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal).padding(.vertical, 6)
-            .contentShape(Rectangle())
+            .foregroundStyle(.white)
+            .padding(.leading, 18).padding(.trailing, 6)
+            .frame(maxWidth: 620, minHeight: 44)
+            .background(Signal.callFill, in: Capsule())
+            .contentShape(Capsule())
+            .padding(.horizontal)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.callerAccent)
+        .accessibilityLabel("当前通话，\(ContactDisplay.numberWithName(number: call.shownNumber(in: sims), contactName: call.shownContactName))，\(simTitle(call.simId, in: sims))")
         .accessibilityHint("展开当前通话")
         .accessibilityIdentifier("calls.ongoingBanner")
     }
 
+    /// S95 in-call page (S46 order): collapse + line, contact / number, status pill + timer, mute · keypad ·
+    /// speaker, DTMF keypad, hang-up pinned to the bottom so it stays reachable at every text size.
     private func fullScreenCall(_ call: CallRecord) -> some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            HStack {
+                Button { presentation.minimize() } label: {
+                    Image(systemName: "chevron.down").font(.title3.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .background(Signal.surface2, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Signal.ink)
+                .accessibilityLabel("收起")
+                .accessibilityIdentifier("calls.minimize")
+                Spacer(minLength: 8)
+                if let sim = sims.first(where: { $0.id == call.simId }) {
+                    SimChip(name: simDisplayName(sim), color: SIMPalette.color(for: sim, in: sims),
+                            detail: simGatewayIdentity(sim, shortened: true), ai: AiBadge(sim: sim), compact: false)
+                } else {
+                    Text(simTitle(call.simId, in: sims)).font(.subheadline).foregroundStyle(Signal.ink2)
+                }
+                Spacer(minLength: 8)
+                Color.clear.frame(width: 44, height: 44)
+            }
+            .padding(.horizontal).padding(.top, 8)
             ScrollView {
                 VStack(spacing: 24) {
                     if availability.reason != nil { NetworkAvailabilityNotice() }
                     primaryCallControls(call)
                 }
-                .padding(24)
+                .padding(.horizontal, 24).padding(.vertical, 16)
                 .frame(maxWidth: 620)
                 .frame(maxWidth: .infinity)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .safeAreaInset(edge: .bottom) {
-                hangupButton(call).padding().background(.bar)
-            }
-            .navigationTitle("当前通话")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { presentation.minimize() } label: {
-                        Label("收起", systemImage: "chevron.down")
-                    }
-                    .accessibilityIdentifier("calls.minimize")
-                }
-            }
+            hangupButton(call).padding(.vertical, 12)
         }
+        .background(Signal.bg.ignoresSafeArea())
         .interactiveDismissDisabled()
     }
 
@@ -257,13 +283,13 @@ struct CallsView<Content: View>: View {
     }
 
     private var dialer: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 10) {
             Button { showingKeypad = true } label: {
                 Text(number.isEmpty ? "输入电话号码" : number)
-                    .font(.system(.title2, design: .rounded).weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(number.isEmpty ? Color.secondary : Color.primary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .font(.system(size: 36, weight: .regular)).monospacedDigit()
+                    .foregroundStyle(number.isEmpty ? Signal.ink3 : Signal.ink)
+                    .lineLimit(1).minimumScaleFactor(0.5)
+                    .frame(maxWidth: .infinity, minHeight: 52)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -272,8 +298,8 @@ struct CallsView<Content: View>: View {
 
             // A real, font-scaled line stays in layout when the asynchronous match is absent.
             Text(dialerContactName ?? " ")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.callerAccent)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Signal.brand)
                 .lineLimit(1)
                 .accessibilityHidden(dialerContactName == nil)
                 .accessibilityLabel("通讯录匹配到 \(dialerContactName ?? "")")
@@ -281,118 +307,131 @@ struct CallsView<Content: View>: View {
 
             if showingKeypad {
                 DialPad(number: $number)
+                    .padding(.top, 8)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            HStack(spacing: 34) {
-                Button { number = PhoneNumberText.deletingLast(from: number) } label: {
-                    Image(systemName: "delete.left").font(.title2).frame(width: 52, height: 52)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: 3), spacing: 0) {
+                Button { number = "" } label: {
+                    Image(systemName: "xmark.circle").font(.title3).frame(width: 52, height: 52)
                 }
+                .foregroundStyle(Signal.ink3)
+                .opacity(number.isEmpty ? 0 : 1)
                 .disabled(number.isEmpty)
-                .accessibilityLabel("删除一位")
+                .accessibilityLabel("清除号码")
 
                 Button { Task { await dial() } } label: {
                     Image(systemName: "phone.fill")
-                        .font(.title2).foregroundStyle(.white)
-                        .frame(width: 62, height: 62).background(.green, in: Circle())
+                        .font(.title).foregroundStyle(.white)
+                        .frame(width: 78, height: 78).background(Signal.callFill, in: Circle())
                 }
                 .disabled(!canDial)
                 .opacity(canDial ? 1 : 0.4)
                 .accessibilityLabel("使用\(selectedSIMValue.map(simDisplayName) ?? "所选号码")拨打")
 
-                Button { number = "" } label: {
-                    Image(systemName: "xmark").font(.title3).frame(width: 52, height: 52)
+                Button { number = PhoneNumberText.deletingLast(from: number) } label: {
+                    Image(systemName: "delete.left").font(.title2).frame(width: 52, height: 52)
                 }
+                .foregroundStyle(Signal.ink2)
                 .disabled(number.isEmpty)
-                .accessibilityLabel("清除号码")
+                .accessibilityLabel("删除一位")
             }
+            .padding(.top, 12)
 
             if let reason = availability.reason {
-                Text(reason).font(.footnote).foregroundStyle(.secondary)
+                Text(reason).font(.footnote).foregroundStyle(Signal.ink2)
             } else if !availability.hasCurrentSIMSnapshot {
-                Text("号码状态待刷新，暂时无法拨号").font(.footnote).foregroundStyle(.secondary)
-            } else if selectedSIMValue?.online != true {
-                Text(selectedSIMValue == nil ? "请选择已分配的号码" : "号码设备离线，暂时无法拨号")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Text("号码状态待刷新，暂时无法拨号").font(.footnote).foregroundStyle(Signal.ink2)
+            } else if let sim = selectedSIMValue, sim.online != true {
+                StatusBanner(kind: .gatewayOffline, title: "号码设备离线", message: "号码设备离线，暂时无法拨号",
+                             chip: SimChip(sim: sim, in: sims, compact: true, showsTail: false))
+            } else if selectedSIMValue == nil {
+                Text("请选择已分配的号码").font(.footnote).foregroundStyle(Signal.ink2)
             } else if selectedSIMValue?.telephonyReady != true || selectedSIMValue?.mediaReady != true {
                 Text("当前设备的电话或媒体能力尚未就绪")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(Signal.ink2)
             } else if CallAvailabilityPolicy.gatewayIsBusy(simID: selectedSIM, sims: sims, calls: calls) {
                 Text("当前号码所在设备已有通话，请在通话结束后拨号")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(Signal.ink2)
             } else if !CallAvailabilityPolicy.canStartOutbound(currentMediaCallID: media.callID) {
                 Text("本机音频正在用于另一通话，请先结束该通话")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(Signal.ink2)
             }
         }
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 20))
         .onTapGesture { /* Consume the outer blank-area dismissal gesture. */ }
     }
 
     @ViewBuilder private func primaryCallControls(_ call: CallRecord) -> some View {
         let requestedAt = session.sessionIdentity.flatMap { endRequests[.init(session: $0, call: call.id)] }
         let ending = CallUIEndPolicy.isPending(requestedAt: requestedAt, state: call.state, now: Date())
-        VStack(spacing: 8) {
-            // §F: 号码 · 姓名 while the call is up.
-            Text(ContactDisplay.numberWithName(number: call.shownNumber(in: sims), contactName: call.shownContactName))
-                .font(.system(.title, design: .rounded).weight(.semibold)).monospacedDigit().lineLimit(2)
-                .minimumScaleFactor(0.7)
-            Text("\(simTitle(call.simId, in: sims)) · 当前登录会话")
-                .font(.caption).foregroundStyle(.secondary)
-            CallUIStatusLabel(call: call, requestedAt: requestedAt)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(requestedAt != nil || call.state == "ending" ? Color.secondary : Color.green)
-            CallElapsedTime(call: call, requestedAt: requestedAt, endingObservedAt: session.sessionIdentity.flatMap { endingObservedAt[.init(session: $0, call: call.id)] }).font(.title2)
+        let name = call.shownContactName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let number = call.shownNumber(in: sims) ?? ""
+        let title = ContactDisplay.title(number: number, contactName: name)
+        VStack(spacing: 10) {
+            Text(String(title.prefix(1)))
+                .font(.system(size: 44, weight: .semibold)).foregroundStyle(Signal.ink2)
+                .frame(width: 104, height: 104)
+                .background(Signal.surface3, in: Circle())
+                .accessibilityHidden(true)
+                .padding(.bottom, 6)
+            // §F: 号码 · 姓名 while the call is up — name large, number under it.
+            Text(title)
+                .font(.system(size: 32, weight: .bold)).monospacedDigit().foregroundStyle(Signal.ink)
+                .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.6)
+                .accessibilityLabel(ContactDisplay.numberWithName(number: number, contactName: name))
+            if !name.isEmpty, !number.isEmpty {
+                Text(number).font(.title3).monospacedDigit().foregroundStyle(Signal.ink2)
+                    .accessibilityHidden(true)
+            }
+            HStack(spacing: 8) {
+                if !ending { Circle().fill(Signal.call).frame(width: 8, height: 8).accessibilityHidden(true) }
+                CallUIStatusLabel(call: call, requestedAt: requestedAt)
+                CallElapsedTime(call: call, requestedAt: requestedAt, endingObservedAt: session.sessionIdentity.flatMap { endingObservedAt[.init(session: $0, call: call.id)] })
+            }
+            .font(.headline).monospacedDigit()
+            .foregroundStyle(ending || requestedAt != nil ? Signal.ink2 : Signal.call)
+            .padding(.horizontal, 16).frame(minHeight: 36)
+            .background(ending || requestedAt != nil ? Signal.surface2 : Signal.callSoft, in: Capsule())
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
+        .padding(.bottom, 24)
         let audioReady: Bool = {
             guard media.callID == call.id else { return false }
             if case .connected = media.state { return true }
             return false
         }()
-        HStack(spacing: 12) {
-            Button {
+        let muted = media.callID == call.id && media.isMuted
+        let speaker = media.callID == call.id && media.isSpeakerEnabled
+        HStack(alignment: .top, spacing: 24) {
+            roundControl(muted ? "已静音" : "静音", symbol: "mic.slash", active: muted,
+                         label: muted ? "取消静音" : "静音") {
                 guard media.callID == call.id else { return }
                 CallCoordinator.shared.setMuted(!media.isMuted, media: media)
-            } label: {
-                Label((media.callID == call.id && media.isMuted) ? "取消静音" : "静音", systemImage: (media.callID == call.id && media.isMuted) ? "mic.fill" : "mic.slash.fill")
-                    .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .buttonStyle(.bordered)
             .disabled(ending || !audioReady || !media.microphoneAvailable)
 
-            Button {
+            // S36 C2: IVR menus need digits on the live cellular call; the gateway plays them, this only sends.
+            roundControl("键盘", symbol: "circle.grid.3x3.fill", active: showingDTMFKeypad, label: "键盘") {
+                showingDTMFKeypad.toggle()
+                dtmfError = nil
+            }
+            .disabled(ending || call.state != "active")
+            .accessibilityIdentifier("calls.dtmfToggle")
+
+            roundControl("扬声器", symbol: "speaker.wave.2", active: speaker,
+                         label: speaker ? "关闭扬声器" : "打开扬声器") {
                 guard speakerControlsEnabled(for: call) else { return }
                 _ = media.setSpeaker(!media.isSpeakerEnabled)
-            } label: {
-                Label(
-                    (media.callID == call.id && media.isSpeakerEnabled) ? "关闭扬声器" : "打开扬声器",
-                    systemImage: (media.callID == call.id && media.isSpeakerEnabled) ? "speaker.slash.fill" : "speaker.wave.2.fill"
-                )
-                .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .buttonStyle(.bordered)
             .disabled(ending || !audioReady || !speakerControlsEnabled(for: call))
-
         }
-        // S36 C2: IVR menus need digits on the live cellular call; the gateway plays them, this only sends.
-        Button {
-            showingDTMFKeypad.toggle()
-            dtmfError = nil
-        } label: {
-            Label("键盘", systemImage: "circle.grid.3x3.fill")
-                .frame(maxWidth: .infinity, minHeight: 44)
-        }
-        .buttonStyle(.bordered)
-        .disabled(ending || call.state != "active")
-        .accessibilityIdentifier("calls.dtmfToggle")
         if showingDTMFKeypad, call.state == "active" {
             InCallKeypad { key in Task { guard !ending, availability.canMutate else { return }; await sendDTMF(key, on: call) } }
                 .disabled(ending || !availability.canMutate)
             if let dtmfError {
                 Text(dtmfError)
-                    .font(.footnote).foregroundStyle(Color.callerDanger)
+                    .font(.footnote).foregroundStyle(Signal.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .reportsError(dtmfError, screen: "calls", site: "dtmf")
             }
@@ -401,7 +440,27 @@ struct CallsView<Content: View>: View {
              ? "通话声音暂不可用，仍可结束通话。"
              : (!audioReady ? "通话声音尚未就绪。"
                 : (media.isMuted ? "麦克风已静音，对方听不到你的声音。" : "通话声音已连接。")))
-            .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+            .font(.footnote).foregroundStyle(Signal.ink2).multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+    }
+
+    /// 76 pt round in-call control; active state is inverted (ink disc, ground-colored glyph).
+    private func roundControl(_ caption: String, symbol: String, active: Bool, label: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: symbol).font(.title2.weight(.medium))
+                    .foregroundStyle(active ? Signal.bg : Signal.ink)
+                    .frame(width: 76, height: 76)
+                    .background(active ? Signal.ink : Signal.surface2, in: Circle())
+                Text(caption).font(.subheadline).foregroundStyle(Signal.ink).lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .frame(minWidth: 76)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private func hangupButton(_ call: CallRecord) -> some View {
@@ -409,28 +468,35 @@ struct CallsView<Content: View>: View {
             let key = session.sessionIdentity.map { CallUIPayload.ID(session: $0, call: call.id) }
             let requestedAt = key.flatMap { endRequests[$0] }
             let pending = CallUIEndPolicy.isPending(requestedAt: requestedAt, state: call.state, now: context.date)
-            VStack(spacing: 6) {
+            let title = pending ? "正在结束…" : (requestedAt == nil ? "结束通话" : "重试结束")
+            VStack(spacing: 8) {
                 Button(role: .destructive) { requestEnd(call) } label: {
-                    HStack(spacing: 8) {
-                        if pending { ProgressView().tint(Color.primary).accessibilityHidden(true) }
-                        Label(pending ? "正在结束…" : (requestedAt == nil ? "结束通话" : "重试结束"), systemImage: "phone.down.fill")
+                    VStack(spacing: 8) {
+                        ZStack {
+                            Circle().fill(pending ? Signal.surface3 : Signal.dangerFill)
+                            if pending {
+                                ProgressView().tint(Signal.ink2).accessibilityHidden(true)
+                            } else {
+                                Image(systemName: "phone.down.fill").font(.title).foregroundStyle(.white)
+                            }
+                        }
+                        .frame(width: 80, height: 80)
+                        Text(pending ? "正在结束…" : (requestedAt == nil ? "结束" : "重试结束"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(pending ? Signal.ink3 : Signal.ink2)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .padding(.vertical, 6)
-                    .foregroundStyle(pending ? Color.primary : Color.white)
-                    .background(
-                        pending ? Color(uiColor: .secondarySystemBackground) : Color.callerDanger,
-                        in: Capsule()
-                    )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(pending)
+                .accessibilityLabel(title)
                 .accessibilityIdentifier("calls.hangup")
                 if requestedAt != nil {
                     Text(pending ? "结束请求已提交，等待确认。" : "尚未确认通话结束，可重试；不会重新拨号。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(Signal.ink2)
                 }
             }
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -545,7 +611,7 @@ struct CallsView<Content: View>: View {
                 } else if call.state == "incoming_ringing" {
                     Button("接听") { answerFeedback += 1; Task { guard availability.canMutate else { return }; await claim(call) } }
                         .buttonStyle(.borderedProminent)
-                        .tint(.green)
+                        .tint(Signal.callFill)
                         .disabled(!availability.canMutate || (media.callID != nil && media.callID != call.id))
                     Spacer()
                     Button("拒接", role: .destructive) { endFeedback += 1; Task { await decline(call) } }
@@ -565,76 +631,39 @@ struct CallsView<Content: View>: View {
             mediaControls(for: call)
         }
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 18))
+        .background(Signal.surface, in: RoundedRectangle(cornerRadius: 18))
         .onTapGesture { showingKeypad = false }
     }
 
     @ViewBuilder private var recentCallList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("最近通话").font(.headline).padding(.horizontal, 4)
-            if !loaded {
-                // S20 decision 8: an empty list before the first response is unknown, not empty.
-                HStack(spacing: 8) { ProgressView(); Text("正在读取通话记录…") }
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding()
-                    .background(.background, in: RoundedRectangle(cornerRadius: 14))
-            } else if recentCalls.isEmpty {
-                Text("当前号码暂无通话记录").font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding()
-                    .background(.background, in: RoundedRectangle(cornerRadius: 14))
-            } else {
-                ForEach(recentCalls.prefix(20)) { call in
-                    NavigationLink { RecordDetailView(call: call) } label: {
-                        HStack(spacing: 12) {
-                            UnreadDot(
-                                visible: UnreadDotPolicy.callUnseen(call, locallySeen: badges.seenCallIDs),
-                                label: "未查看"
-                            )
-                            Image(systemName: call.direction == "incoming" ? "phone.arrow.down.left" : "phone.arrow.up.right")
-                                .foregroundStyle(call.state == "failed" ? Color.callerDanger : Color.accentColor)
-                                .frame(width: 28)
-                            VStack(alignment: .leading, spacing: 3) {
-                                // S36 C5-a: a matched name gets its own line so the number below it is never
-                                // truncated by the "号码 · 姓名" one-liner.
-                                RecentCallTitle(number: call.shownNumber(in: sims), contactName: call.shownContactName)
-                                Text(callLineTitle(call.simId, in: sims) ?? simTitle(call.simId, in: sims))
-                                    .font(.caption).foregroundStyle(.secondary)
-                                // Accessibility sizes: the right column moves under the text instead of squeezing it.
-                                if dynamicTypeSize.isAccessibilitySize {
-                                    recentCallFacts(call, alignment: .leading).font(.caption)
-                                }
+            Text("最近通话").font(.headline).foregroundStyle(Signal.ink).padding(.horizontal, 4)
+            Group {
+                if !loaded {
+                    // S20 decision 8: an empty list before the first response is unknown, not empty.
+                    HStack(spacing: 8) { ProgressView(); Text("正在读取通话记录…") }
+                        .font(.subheadline).foregroundStyle(Signal.ink2)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding()
+                } else if recentCalls.isEmpty {
+                    Text("当前号码暂无通话记录").font(.subheadline).foregroundStyle(Signal.ink2)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding()
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(recentCalls.prefix(20).enumerated()), id: \.element.id) { index, call in
+                            if index > 0 { Divider().overlay(Signal.line).padding(.leading, 68) }
+                            NavigationLink { RecordDetailView(call: call) } label: {
+                                CallHistoryRow(call: call, sims: sims)
+                                    .padding(.horizontal, 16).padding(.vertical, 10)
+                                    .contentShape(Rectangle())
                             }
-                            Spacer()
-                            if !dynamicTypeSize.isAccessibilitySize {
-                                // S82: duration (when answered), date, status stacked right-aligned so 未接来电 never wraps.
-                                recentCallFacts(call, alignment: .trailing)
-                                    .font(.caption).lineLimit(1).fixedSize()
-                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .padding()
-                    .background(.background, in: RoundedRectangle(cornerRadius: 14))
                 }
             }
+            .background(Signal.surface, in: RoundedRectangle(cornerRadius: Signal.Radius.card))
         }
         .onTapGesture { showingKeypad = false }
-    }
-
-    private func recentCallFacts(_ call: CallRecord, alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 3) {
-            if let duration = CallDurationLabel.text(answeredAt: call.answeredAt, endedAt: call.endedAt) {
-                Text(duration).foregroundStyle(.secondary)
-                    .accessibilityLabel("通话时长 \(duration)")
-            }
-            Text(GatewayTimeDisplay.compact(
-                call.endedAt ?? call.startedAt,
-                timeZone: GatewayTimeDisplay.resolvedTimeZone(
-                    callZone: call.gatewayTimeZone,
-                    simZone: sims.first { $0.id == call.simId }?.timeZone
-                )
-            )).foregroundStyle(.secondary)
-            Text(call.rowStateTitle).foregroundStyle(call.isMissedIncoming ? .red : .secondary)
-        }
     }
 
     /// S20 decision 5: 2 s while one of this session's own calls is still moving, 5 s otherwise.

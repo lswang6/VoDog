@@ -1,11 +1,14 @@
-import React, {useEffect,useRef,useState} from 'react';
+import React, {useEffect,useRef,useState,useSyncExternalStore} from 'react';
+import './records.css';
 import {useReportedError} from './ui-error';
 import {UiIcon} from './icons';
 import {CallRecording} from './recording';
 import {preferPixelSource} from './recording-contract';
 import {AiTranscriptToggle,CallTranscript,talkDuration} from './reports';
 import {HistoryCallActions} from './history-call-actions';
-import {formatCompactCallDate,gatewayDisplayTimeZone} from './gateway-time';
+import {formatCompactCallDate,gatewayCalendarDate,gatewayDisplayTimeZone,shiftCalendarDate} from './gateway-time';
+import {SimChip} from './sim-chip';
+import {simPaletteColor} from './sim-palette';
 import {mayEndCall} from './media-policy';
 import {gatewayKindLabel,gatewayShortLabel} from './gateway-kind';
 import {AI_ANSWERING_LABEL,aiSuppressed,internalCallRoute,offersAnswerControls,type CallOccupancy} from './call-occupancy';
@@ -30,8 +33,8 @@ export function callRowOwner(c:Call,sessionUsername?:string):string|undefined{
  return c.claimedByCurrentSession&&sessionUsername?`${sessionUsername} · 当前浏览器`:c.answeredByDevice||platformLabel(c.answeredByPlatform)||(c.direction==='outgoing'?platformLabel(c.originatingPlatform):undefined);
 }
 const PLATFORM_LABELS:Record<string,string>={ios:'iPhone 端',android:'Android 端',macos:'Mac 端',web:'网页端',ai:'AI 接听',device:'网关本机'};
-/** Raw platform ids (`macos`…) never reach the row; unknown ones stay as sent. */
-function platformLabel(p?:string|null){return p?PLATFORM_LABELS[p]??p:undefined;}
+/** Raw platform ids (`macos`…) never reach the row; an unknown one shows nothing (S95b §C). */
+function platformLabel(p?:string|null){return p?PLATFORM_LABELS[p]:undefined;}
 /** S38：忙线冲突的两种结局；自动拒接的记录同时带 `conflictDisposition='rejected'`，所以先看 failureReason。 */
 export function busyConflictLabel(c:Pick<Call,'failureReason'|'conflictDisposition'>):string|null{
  if(c.failureReason==='busy_auto_rejected')return '忙线未接';
@@ -59,6 +62,74 @@ export function interceptedCallLabel(c:Pick<Call,'failureReason'|'blockedSource'
 /** Only an AI-answered call can have an AI 对话; the old Control that predates both fields never ran the AI at all. */
 export function aiAnsweredCall(c:Pick<Call,'answeredByPlatform'|'conflictDisposition'>):boolean{
  return c.answeredByPlatform==='ai'||c.conflictDisposition==='ai_answered';
+}
+
+export type CallKind='blocked'|'ai'|'missed'|'outgoing'|'incoming';
+/** S95 row icon: 已拦截 shield (the call itself was intercepted; a number blocked later keeps its direction icon), AI 代接 ✦, 未接 red ↙, 呼出 ↗, 呼入 ↙ — derived only from existing fields. */
+export function callDirectionKind(c:Call):CallKind{
+ if(interceptedCallLabel(c))return 'blocked';
+ if(aiAnsweredCall(c))return 'ai';
+ if(missedIncomingCall(c))return 'missed';
+ return c.direction==='outgoing'?'outgoing':'incoming';
+}
+const DIR_GLYPH:Record<Exclude<CallKind,'blocked'>,string>={ai:'✦',missed:'↙',outgoing:'↗',incoming:'↙'};
+
+/** S95 记录 list headers: 今天 / 昨天 / 本周 (Monday-start, gateway wall clock) / otherwise the calendar day. */
+export function callDateGroup(startedAt:string,zone:string,now:Date=new Date()):string{
+ const day=gatewayCalendarDate(startedAt,zone),today=gatewayCalendarDate(now,zone);
+ if(!day||!today)return '';
+ if(day===today)return '今天';
+ if(day===shiftCalendarDate(today,-1))return '昨天';
+ const weekday=(new Date(`${today}T00:00:00Z`).getUTCDay()+6)%7;
+ if(day<today&&day>=shiftCalendarDate(today,-weekday))return '本周';
+ const [y,m,d]=day.split('-').map(Number);
+ return `${y===Number(today.slice(0,4))?'':`${y}年`}${m}月${d}日`;
+}
+/** Under a date header the row only needs the clock; 本周 also names the weekday. */
+function groupedTime(startedAt:string,zone:string,group:string):string{
+ const full=formatCompactCallDate(startedAt,zone),clock=full.slice(11);
+ if(!clock)return full;
+ return group==='本周'?`周${'日一二三四五六'[new Date(`${full.slice(0,10)}T00:00:00Z`).getUTCDay()]} ${clock}`:clock;
+}
+
+/** 电话 page recent list: 今天 14:32 / 昨天 20:16 / 周二 10:21 / 9/13. */
+export function relativeCallTime(startedAt:string,zone:string,now:Date=new Date()):string{
+ const group=callDateGroup(startedAt,zone,now),full=formatCompactCallDate(startedAt,zone),clock=full.slice(11);
+ if(!clock)return full;
+ if(group==='今天'||group==='昨天')return `${group} ${clock}`;
+ if(group==='本周')return groupedTime(startedAt,zone,group);
+ return `${Number(full.slice(5,7))}/${Number(full.slice(8,10))}`;
+}
+
+const WIDE_RECORDS='(min-width: 1001px)';
+function subscribeWide(notify:()=>void){const query=globalThis.matchMedia?.(WIDE_RECORDS);query?.addEventListener?.('change',notify);return()=>query?.removeEventListener?.('change',notify);}
+/** >1000px: list + detail pane. Without matchMedia (tests, old browsers) the single-column rows stay as before. */
+export function useWideRecords():boolean{
+ return useSyncExternalStore(subscribeWide,()=>Boolean(globalThis.matchMedia?.(WIDE_RECORDS).matches),()=>false);
+}
+
+/** Secondary facts of a row (who answered, busy conflict, interception source). */
+function callFacts(c:Call,sessionUsername?:string):string[]{
+ const owner=callRowOwner(c,sessionUsername),busyLabel=busyConflictLabel(c);
+ return [
+  owner&&`${c.direction==='outgoing'?'发起':'接听'}：${owner}`,
+  busyLabel&&(c.failureReason!=='busy_auto_rejected'||!missedIncomingCall(c))?busyLabel:'',
+  // An intercepted call names its source in the direction line instead.
+ ].filter((value):value is string=>Boolean(value));
+}
+function directionSmall(c:Call){
+ const blockedLabel=interceptedCallLabel(c);
+ if(blockedLabel)return <small>{c.direction==='outgoing'?'呼出':'呼入'} · {blockedLabel}</small>;
+ return missedIncomingCall(c)?<small className="missed">呼入 · {c.failureReason==='busy_auto_rejected'?'忙线未接':'未接来电'}</small>:<small>{c.direction==='outgoing'?'呼出':'呼入'} · {labels[c.state]||labels.unknown}</small>;
+}
+function CallSimChip({c,sim,sims,simName,quiet=false}:{c:Call;sim?:Sim;sims:Sim[];simName?:string;/** Gateway name for screen readers only (compact rows). */quiet?:boolean}){
+ return <small className="call-record-sim"><SimChip name={simName||'未命名号码'} color={sim?simPaletteColor(sim,sims):'var(--ink-3)'} ai={sim?.settings}/>{sim&&<span className={quiet?'call-record-gateway sr-only':'call-record-gateway'}>{` · ${gatewayShortLabel(sim.gatewayId,sim.gatewayKind??c.gatewayKind,sim.gatewayName)}`}</span>}</small>;
+}
+function callTitle(c:Call,simName?:string){
+ const remote=c.remoteNumber||c.number||'';
+ const name=(c.contactName||'').trim();
+ const internal=internalCallTitle(c,simName);
+ return {remote,title:internal??(name||remote||'未知号码'),showNumber:!internal&&Boolean(name&&remote)};
 }
 
 export function Empty({text,detail}:{text:string;detail:string}){return <div className="empty"><span aria-hidden="true">◌</span><h3>{text}</h3><p>{detail}</p></div>}
@@ -95,6 +166,7 @@ export function CallHistoryPanel({
  storageKey,
  onHistoryAction,
  onOpenCard,
+ onOpenCall,
  seenIds,
 }:{
  request:ApiRequest;
@@ -109,9 +181,13 @@ export function CallHistoryPanel({
  storageKey?:string;
  onHistoryAction?:(call:Call,action:'redial'|'sms'|'block'|'delete')=>void|Promise<void>;
  onOpenCard?:(call:Call)=>void;
+ /** Wide layout: a row was selected into the detail pane (the shell may count it as opened, S67). */
+ onOpenCall?:(call:Call)=>void;
  /** S67c: calls opened in this tab lose their dot before the next read. */
  seenIds?:ReadonlySet<string>;
 }){
+ const wide=useWideRecords();
+ const [selectedId,setSelectedId]=useState<string|null>(null);
  const [saved]=useState(()=>readViewState(storageKey));
  const [query,setQuery]=useState(()=>storedText(saved.search)),[search,setSearch]=useState(()=>storedText(saved.search).trim());
  const [items,setItems]=useState<Call[]|null>(null),[error,setError]=useState('');
@@ -159,53 +235,123 @@ export function CallHistoryPanel({
 
  // A pre-S28 Control ignores `simId`, so the same filter stays client-side for the transition.
  const shown=(items||[]).filter(call=>!simId||call.simId===simId);
+ const selected=wide?shown.find(call=>call.id===selectedId):undefined;
+ const selectedSim=selected&&sims.find(s=>s.id===selected.simId);
  return (
-  <section className="panel call-history">
-   <h2>通话记录</h2>
-   <label className="call-search">搜索
-    <input type="search" value={query} placeholder="搜索姓名或号码" autoComplete="off" spellCheck={false} onChange={e=>setQuery(e.target.value)}/>
-   </label>
-   {error&&<p className="error" role="alert">{error}</p>}
-   {items===null
-    ?<p role="status">{search?'正在搜索通话…':'正在读取通话记录…'}</p>
-    :<CallList calls={shown} sims={sims} sessionUsername={sessionUsername} mediaCallId={mediaCallId} busy={busy} showRecordings onHistoryAction={onHistoryAction} onOpenCard={onOpenCard} request={request} seenIds={seenIds}/>}
-   <p className="note">{search?'搜索结果来自服务器，按姓名或号码匹配所选范围的通话。':'展开录音可一起听双方声音，也可分别播放原声。点击记录可打开联系人卡片。'}</p>
-   <Pager
-    page={page}
-    pageSize={pageSize}
-    total={total}
-    totalPages={totalPages}
-    busy={busy||(loading&&items===null)}
-    onPageChange={next=>setPage(clampPage(next,totalPages??1))}
-    onPageSizeChange={next=>{setPageSize(next);setPage(1);}}
-   />
+  <section className={'panel call-history'+(wide?' records-split':'')}>
+   <div className="records-list-pane">
+    <h2 className="records-title">通话记录</h2>
+    <label className="call-search">搜索
+     <input type="search" value={query} placeholder="搜索姓名或号码" autoComplete="off" spellCheck={false} onChange={e=>setQuery(e.target.value)}/>
+    </label>
+    {error&&<p className="error" role="alert">{error}</p>}
+    {items===null
+     ?<p role="status">{search?'正在搜索通话…':'正在读取通话记录…'}</p>
+     :<CallList calls={shown} sims={sims} sessionUsername={sessionUsername} mediaCallId={mediaCallId} busy={busy} showRecordings grouped onHistoryAction={onHistoryAction} onOpenCard={onOpenCard} request={request} seenIds={seenIds}
+       selectedId={wide?selectedId:null} onSelect={wide?call=>{setSelectedId(call.id);onOpenCall?.(call);}:undefined}/>}
+    <Pager
+     page={page}
+     pageSize={pageSize}
+     total={total}
+     totalPages={totalPages}
+     busy={busy||(loading&&items===null)}
+     onPageChange={next=>setPage(clampPage(next,totalPages??1))}
+     onPageSizeChange={next=>{setPageSize(next);setPage(1);}}
+    />
+    <p className="note">{search?'搜索结果来自服务器，按姓名或号码匹配所选范围的通话。':wide?'选择一条通话，可在右侧收听录音、查看转录。':'展开录音可一起听双方声音，也可分别播放原声。点击记录可打开联系人卡片。'}</p>
+   </div>
+   {wide&&<div className="records-detail-pane">
+    {selected
+     ?<CallDetail key={selected.id} call={selected} sim={selectedSim} sims={sims} sessionUsername={sessionUsername} mediaCallId={mediaCallId} busy={busy} request={request} onHistoryAction={onHistoryAction} onOpenCard={onOpenCard}/>
+     :<Empty text="选择一条通话" detail="在左侧选择通话，可查看详情、录音与转录。"/>}
+   </div>}
   </section>
  );
 }
 
+/** Wide 记录 detail pane: the same actions and media a single-column row carries, laid out as one card. */
+function CallDetail({call:c,sim,sims,sessionUsername,mediaCallId=null,busy,request,onHistoryAction,onOpenCard}:{call:Call;sim?:Sim;sims:Sim[];sessionUsername?:string;mediaCallId?:string|null;busy:boolean;request:ApiRequest;onHistoryAction?:(call:Call,action:'redial'|'sms'|'block'|'delete')=>void|Promise<void>;onOpenCard?:(call:Call)=>void}){
+ const zone=gatewayDisplayTimeZone(c.gatewayTimeZone,sim?.timeZone);
+ const simName=c.simLabel||sim?.label||sim?.phoneLabel;
+ const {remote,title,showNumber}=callTitle(c,simName);
+ const kind=callDirectionKind(c),duration=talkDuration(c),ai=aiAnsweredCall(c);
+ const name=(c.contactName||'').trim();
+ return <article className="call-detail" aria-label={`通话详情 ${numberWithContact(remote,c.contactName)}`}>
+  <header className="call-detail-head">
+   <span className={`call-avatar call-dir-${kind}`} aria-hidden="true">{name?Array.from(name)[0]:kind==='blocked'?<UiIcon name="blocked"/>:DIR_GLYPH[kind]}</span>
+   <div className="call-detail-title">
+    <h3 dir="auto">{title}</h3>
+    <p className="call-detail-meta">{showNumber&&<span className="num" dir="ltr">{remote}</span>}{(sim||simName)&&<CallSimChip c={c} sim={sim} sims={sims} simName={simName}/>}{directionSmall(c)}<time className="num" dateTime={c.startedAt}>{formatCompactCallDate(c.startedAt,zone)}</time>{duration&&<span className="num">{duration}</span>}</p>
+   </div>
+  </header>
+  {callFacts(c,sessionUsername).map(fact=><p className="call-owner" key={fact}>{fact}</p>)}
+  {aiSuppressed(c)&&<p className="call-ai-status" role="status">{AI_ANSWERING_LABEL}</p>}
+  <HistoryCallActions variant="detail" remoteNumber={remote||undefined} simId={c.simId} mediaLive={Boolean(mediaCallId)} busy={busy} onRedial={()=>void onHistoryAction?.(c,'redial')} onSms={()=>void onHistoryAction?.(c,'sms')} onBlock={()=>onHistoryAction?.(c,'block')} onDelete={onHistoryAction?()=>onHistoryAction(c,'delete'):undefined} onContact={onOpenCard?()=>onOpenCard(c):undefined} contactLabel={c.contactId?'联系人信息':'存为联系人'}/>
+  <section className="record-card call-detail-recording" aria-label="通话录音">
+   <h4>通话录音</h4>
+   <CallRecording callId={c.id} timeZone={zone} request={request} preferPixelSource={preferPixelSource(c)} ownerJoinedLocal={c.ownerJoinedLocal} gatewayKind={c.gatewayKind??sim?.gatewayKind} initialOpen/>
+  </section>
+  <section className="call-detail-transcript" aria-label="转录">
+   <h4>转录{ai&&<span className="record-tag tag-ai">AI 代接</span>}</h4>
+   <CallTranscript callId={c.id} request={request} initialOpen/>
+   {ai&&<AiTranscriptToggle callId={c.id} request={request} labels={AI_TRANSCRIPT_LABELS} initialOpen/>}
+  </section>
+ </article>;
+}
+
 const NO_IDS:ReadonlySet<string>=new Set();
 
-export function CallList({calls,sims=[],sessionUsername,primaryControlledCallId=null,mediaCallId=null,busy=false,onAction,showRecordings=false,onHistoryAction,onOpenCard,request,seenIds=NO_IDS}:{calls:Call[];seenIds?:ReadonlySet<string>;sims?:Sim[];sessionUsername?:string;primaryControlledCallId?:string|null;mediaCallId?:string|null;showRecordings?:boolean;busy?:boolean;onAction?:(id:string,action:'claim'|'end')=>Promise<void>;onHistoryAction?:(call:Call,action:'redial'|'sms'|'block'|'delete')=>void|Promise<void>;onOpenCard?:(call:Call)=>void;request?:<T>(path:string,body?:unknown,method?:string)=>Promise<T>}){
+export function CallList({calls,sims=[],sessionUsername,primaryControlledCallId=null,mediaCallId=null,busy=false,onAction,showRecordings=false,onHistoryAction,onOpenCard,request,seenIds=NO_IDS,grouped=false,selectedId=null,onSelect}:{calls:Call[];seenIds?:ReadonlySet<string>;sims?:Sim[];sessionUsername?:string;primaryControlledCallId?:string|null;mediaCallId?:string|null;showRecordings?:boolean;busy?:boolean;onAction?:(id:string,action:'claim'|'end')=>Promise<void>;onHistoryAction?:(call:Call,action:'redial'|'sms'|'block'|'delete')=>void|Promise<void>;onOpenCard?:(call:Call)=>void;request?:<T>(path:string,body?:unknown,method?:string)=>Promise<T>;
+ /** 记录: insert 今天 / 昨天 / 本周 / date headers and show only the clock per row. */
+ grouped?:boolean;
+ /** Wide 记录 layout: the row selects into the detail pane instead of expanding in place. */
+ selectedId?:string|null;onSelect?:(call:Call)=>void}){
  if(!calls.length)return <Empty text="还没有通话记录" detail="接听或拨打后，可在这里查看通话详情。"/>;
- return <div>{calls.map(c=>{
+ const now=new Date();
+ let lastGroup='';
+ return <div className={'call-list'+(onSelect?' call-list-select':'')+(showRecordings?'':' call-list-compact')}>{calls.map(c=>{
   const sim=sims.find(s=>s.id===c.simId);
   const zone=gatewayDisplayTimeZone(c.gatewayTimeZone,sim?.timeZone);
+  const group=grouped?callDateGroup(c.startedAt,zone,now):'';
+  const header=group&&group!==lastGroup?<h3 className="call-group-label" key={`group-${c.id}`}>{group}</h3>:null;
+  lastGroup=group||lastGroup;
   // While the AI answers, this row is a status, not a choice: no ringtone, no 接听, no 拒接 (S22 决策 4).
   const suppressed=aiSuppressed(c);
   const mayEnd=!suppressed&&c.id!==primaryControlledCallId&&mayEndCall(c,mediaCallId);
-  const owner=callRowOwner(c,sessionUsername),busyLabel=busyConflictLabel(c),blockedLabel=interceptedCallLabel(c);
-  const remote=c.remoteNumber||c.number||'';
+  const blockedLabel=interceptedCallLabel(c);
   const simName=c.simLabel||sim?.label||sim?.phoneLabel;
-  const internalTitle=internalCallTitle(c,simName);
-  const openCard=()=>onOpenCard?.(c);
+  const {remote,title,showNumber}=callTitle(c,simName);
+  const kind=callDirectionKind(c);
+  const select=onSelect?()=>onSelect(c):undefined;
+  const openCard=select??(()=>onOpenCard?.(c));
+  const interactive=Boolean(onSelect||onOpenCard);
   const dot=callShowsDot(c,seenIds);
-  return <article className="record call-record" key={c.id} id={`call-record-${c.id}`} role={onOpenCard?'group':undefined} aria-label={onOpenCard?`${dot?'未查看，':''}通话记录 ${internalTitle??numberWithContact(remote,c.contactName)}，按回车打开联系人卡片`:undefined} tabIndex={onOpenCard?0:undefined} onKeyDown={onOpenCard?event=>{
+  const duration=talkDuration(c);
+  // 电话 page recent list (no media): compact S95 row — relative time, chip column, hover quick actions, facts for screen readers.
+  const compact=!showRecordings;
+  const facts=callFacts(c,sessionUsername);
+  const chip=(sim||simName)&&<CallSimChip c={c} sim={sim} sims={sims} simName={simName} quiet={compact}/>;
+  return <React.Fragment key={c.id}>{header}<article className={`record call-record call-kind-${kind}${selectedId===c.id?' selected':''}`} id={`call-record-${c.id}`} role={interactive?'group':undefined} aria-current={selectedId===c.id?'true':undefined} aria-label={interactive?`${dot?'未查看，':''}通话记录 ${internalCallTitle(c,simName)??numberWithContact(remote,c.contactName)}，${onSelect?'按回车查看详情':'按回车打开联系人卡片'}`:undefined} tabIndex={interactive?0:undefined} onKeyDown={interactive?event=>{
    if(event.target!==event.currentTarget||!['Enter',' '].includes(event.key))return;
    event.preventDefault();openCard();
-  }:undefined} onClick={onOpenCard?event=>{
+  }:undefined} onClick={interactive?event=>{
    // The row itself opens the card, but never when the click landed on a control or on the media sections.
    if(event.target instanceof Element&&event.target.closest('button,a,input,audio,details,summary,label,.call-recording,.report-transcript,.transcript-detail,.ai-transcript,.record-media-actions,.record-actions,.confirm-action'))return;
    openCard();
-  }:undefined}><div className="call-record-heading"><div className="call-record-number">{dot&&<span className="unread-dot call-unread-dot"><span className="sr-only">未查看</span></span>}<strong dir="ltr">{(isBlockedRow(c)||blockedLabel)&&<span className="blocked-mark" role="img" aria-label={blockedLabel&&!isBlockedRow(c)?'已拦截':'已屏蔽'}><UiIcon name="blocked"/></span>}{internalTitle??numberWithContact(remote,c.contactName)}</strong>{missedIncomingCall(c)?<small className="missed">呼入 · {c.failureReason==='busy_auto_rejected'?'忙线未接':'未接来电'}</small>:<small>{c.direction==='outgoing'?'呼出':'呼入'} · {labels[c.state]||c.state}</small>}</div><div className="call-record-meta"><time dateTime={c.startedAt}>{formatCompactCallDate(c.startedAt,zone)}</time>{onOpenCard&&<button type="button" className="record-info" aria-label={`联系人信息 ${remote||'未知号码'}`} disabled={busy} onClick={openCard}><UiIcon name="info"/></button>}</div></div>{(sim||simName)&&<small className="call-record-sim">{simName||'未命名号码'}{sim&&` · ${gatewayShortLabel(sim.gatewayId,sim.gatewayKind??c.gatewayKind,sim.gatewayName)}`}</small>}{owner&&<p className="call-owner">{c.direction==='outgoing'?'发起':'接听'}：{owner}</p>}{busyLabel&&(c.failureReason!=='busy_auto_rejected'||!missedIncomingCall(c))&&<p className="call-owner">{busyLabel}</p>}{blockedLabel&&<p className="call-owner">{blockedLabel}</p>}{talkDuration(c)&&<small className="call-duration">通话时长 {talkDuration(c)}</small>}{suppressed&&<p className="call-ai-status" role="status">{AI_ANSWERING_LABEL}</p>}{onAction&&(offersAnswerControls(c)||mayEnd)&&<div className="record-actions">{offersAnswerControls(c)&&<button className="primary" disabled={busy||Boolean(mediaCallId&&mediaCallId!==c.id)} onClick={()=>void onAction(c.id,'claim')}>接听</button>}{mayEnd&&<button className="passkey hangup" disabled={busy} onClick={()=>void onAction(c.id,'end')}>{c.state==='incoming_ringing'?'拒接':'结束通话'}</button>}</div>}{showRecordings&&<><HistoryCallActions remoteNumber={c.remoteNumber||c.number} simId={c.simId} mediaLive={Boolean(mediaCallId)} busy={busy} onRedial={()=>void onHistoryAction?.(c,'redial')} onSms={()=>void onHistoryAction?.(c,'sms')} onBlock={()=>onHistoryAction?.(c,'block')} onDelete={onHistoryAction?()=>onHistoryAction(c,'delete'):undefined}/><div className="record-media-actions" role="group" aria-label="录音与转录"><CallRecording callId={c.id} timeZone={zone} request={request} preferPixelSource={preferPixelSource(c)} ownerJoinedLocal={c.ownerJoinedLocal} gatewayKind={c.gatewayKind??sim?.gatewayKind}/><CallTranscript callId={c.id} request={request}/>{request&&aiAnsweredCall(c)&&<AiTranscriptToggle callId={c.id} request={request} labels={AI_TRANSCRIPT_LABELS}/>}</div></>}</article>;
+  }:undefined}><div className="call-record-heading">
+   <span className={`call-dir call-dir-${kind}`} aria-hidden={kind==='blocked'?undefined:'true'}>{kind==='blocked'?<span className="blocked-mark" role="img" aria-label={blockedLabel&&!isBlockedRow(c)?'已拦截':'已屏蔽'}><UiIcon name="blocked"/></span>:DIR_GLYPH[kind]}</span>
+   <div className="call-record-number">
+    <strong dir="auto">{dot&&<span className="unread-dot call-unread-dot"><span className="sr-only">未查看</span></span>}{kind!=='blocked'&&isBlockedRow(c)&&<span className="blocked-mark" role="img" aria-label="已屏蔽"><UiIcon name="blocked"/></span>}{title}</strong>
+    <span className="call-record-line">{!compact&&chip}{showNumber&&<span className="call-record-remote num" dir="ltr">{remote}</span>}{directionSmall(c)}{duration&&<small className="call-duration num"> · {duration}</small>}{aiAnsweredCall(c)&&<span className="record-tag tag-ai">AI 代接</span>}{compact&&facts.length>0&&<span className="sr-only">{facts.join('；')}</span>}</span>
+   </div>
+   {compact&&chip}
+   <div className="call-record-meta"><time className="num" dateTime={c.startedAt} title={formatCompactCallDate(c.startedAt,zone)}>{grouped?groupedTime(c.startedAt,zone,group):compact?relativeCallTime(c.startedAt,zone,now):formatCompactCallDate(c.startedAt,zone)}</time>{onOpenCard&&!onSelect&&!(compact&&onHistoryAction)&&<button type="button" className="record-info" aria-label={`联系人信息 ${remote||'未知号码'}`} disabled={busy} onClick={()=>onOpenCard(c)}><UiIcon name="info"/></button>}</div>
+  </div>
+  {!onSelect&&!compact&&facts.map(fact=><p className="call-owner" key={fact}>{fact}</p>)}
+  {suppressed&&<p className="call-ai-status" role="status">{AI_ANSWERING_LABEL}</p>}
+  {onAction&&(offersAnswerControls(c)||mayEnd)&&<div className="record-actions">{offersAnswerControls(c)&&<button className="primary" disabled={busy||Boolean(mediaCallId&&mediaCallId!==c.id)} onClick={()=>void onAction(c.id,'claim')}>接听</button>}{mayEnd&&<button className="passkey hangup" disabled={busy} onClick={()=>void onAction(c.id,'end')}>{c.state==='incoming_ringing'?'拒接':'结束通话'}</button>}</div>}
+  {(showRecordings||onHistoryAction)&&<HistoryCallActions remoteNumber={c.remoteNumber||c.number} simId={c.simId} mediaLive={Boolean(mediaCallId)} busy={busy} onRedial={()=>void onHistoryAction?.(c,'redial')} onSms={()=>void onHistoryAction?.(c,'sms')} onBlock={()=>onHistoryAction?.(c,'block')} onDelete={onHistoryAction?()=>onHistoryAction(c,'delete'):undefined}/>}
+  {showRecordings&&!onSelect&&<div className="record-media-actions" role="group" aria-label="录音与转录"><CallRecording callId={c.id} timeZone={zone} request={request} preferPixelSource={preferPixelSource(c)} ownerJoinedLocal={c.ownerJoinedLocal} gatewayKind={c.gatewayKind??sim?.gatewayKind}/><CallTranscript callId={c.id} request={request}/>{request&&aiAnsweredCall(c)&&<AiTranscriptToggle callId={c.id} request={request} labels={AI_TRANSCRIPT_LABELS}/>}</div>}
+ </article></React.Fragment>;
  })}</div>;
 }

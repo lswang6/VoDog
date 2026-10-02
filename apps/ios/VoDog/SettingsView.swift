@@ -154,6 +154,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 appearanceSection
                 badgeSection
                 if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
@@ -168,7 +169,10 @@ struct SettingsView: View {
                 refreshSection
                 logoutSection
                 loadErrorSection
-            }.navigationTitle("设置").toolbarTitleDisplayMode(.inlineLarge).refreshable { await refreshApplicationStatus() }
+                }
+                .listRowBackground(Signal.surface)
+            }
+            .signalList().navigationTitle("设置").toolbarTitleDisplayMode(.inlineLarge).refreshable { await refreshApplicationStatus() }
             .task(id: "\(session.sessionIdentity?.uuidString ?? "none"):\(navigation.tab):\(scenePhase)") {
                 guard navigation.tab == .settings, scenePhase == .active else { return }
                 guard session.sessionIdentity != nil else { clearSessionData(); return }
@@ -277,11 +281,28 @@ struct SettingsView: View {
         NavigationLink {
             SIMSettingsView(sim: sim) { await load() }
         } label: {
+            // S95: line square + name, status shape + words, answer-mode summary; unconfirmed settings in warn.
             VStack(alignment: .leading, spacing: 4) {
-                Text(simDisplayName(sim))
+                HStack(spacing: 8) {
+                    SimSwatch(color: SIMPalette.color(for: sim, in: sims))
+                    Text(simDisplayName(sim)).font(.body.weight(.semibold)).foregroundStyle(Signal.ink)
+                    Spacer(minLength: 4)
+                    if let status = LineStatus(sim: sim, availability: availability) { SimStatusShape(status: status) }
+                    Text(availability.simStatus(sim)).font(.footnote).foregroundStyle(Signal.ink2)
+                }
+                // S95b §A: AI modes as the full badge (wraps under the name, never squeezes it); 人工接听 stays text.
+                if let badge = AiBadge(sim: sim, full: true) { badge } else {
+                    Text(modeTitle(sim.settings?.mode)).font(.subheadline).foregroundStyle(Signal.ink2)
+                }
+                if let settings = sim.settings, (settings.appliedVersion ?? -1) < settings.version {
+                    HStack(spacing: 6) {
+                        SimStatusShape(status: .pending)
+                        Text(SettingsApplyPolicy.subtitle(appliedVersion: settings.appliedVersion, version: settings.version))
+                    }
+                    .font(.footnote).foregroundStyle(Signal.warn)
+                }
                 // Same identity block the compose sheet shows, instead of a second phrasing of it.
                 SIMIdentityDetail(sim: sim)
-                Text(simStatusLine(sim)).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -289,11 +310,6 @@ struct SettingsView: View {
     private func simDisplayName(_ sim: SIMChannel) -> String {
         if let label = sim.label { return label }
         return "SIM \((sim.slotIndex ?? 0) + 1)"
-    }
-
-    private func simStatusLine(_ sim: SIMChannel) -> String {
-        let status = availability.simStatus(sim)
-        return "\(status) · \(modeTitle(sim.settings?.mode))"
     }
 
     private var blocklistSection: some View {
@@ -349,7 +365,7 @@ struct SettingsView: View {
             }
             if let message = passkey.statusMessage {
                 Label(message, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Signal.call)
                     .accessibilityIdentifier("passkey-status")
             }
             if let message = passkey.errorMessage {
@@ -504,7 +520,7 @@ struct SettingsView: View {
                     Text(VoiceProviderPolicy.displayLabel(item))
                     Label(VoiceProviderPolicy.statusTitle(item), systemImage: VoiceProviderPolicy.statusSymbol(item))
                         .font(.caption)
-                        .foregroundStyle(reason == nil ? Color.green : Color.orange)
+                        .foregroundStyle(reason == nil ? Signal.call : Signal.warn)
                     // The reason a row cannot be chosen is the row's own subtitle, not a banner somewhere else.
                     if let reason { Text(reason).font(.caption2).foregroundStyle(.secondary) }
                 }
@@ -651,7 +667,7 @@ struct SettingsView: View {
                 .foregroundStyle(item.online || item.standbyOnline ? Color.secondary : Color.callerDanger)
             Text(GatewayPowerPolicy.remotePowerTitle(item))
                 .font(.caption)
-                .foregroundStyle(item.remotePowerAllowed ? Color.secondary : Color.orange)
+                .foregroundStyle(item.remotePowerAllowed ? Color.secondary : Signal.warn)
             Text(GatewayPowerPolicy.heartbeatTitle(item) { displayDate($0) })
                 .font(.caption2).foregroundStyle(.secondary)
                 .accessibilityIdentifier("gatewayPower.heartbeat")
@@ -679,7 +695,7 @@ struct SettingsView: View {
                 Text(disabledReason).font(.caption2).foregroundStyle(.secondary)
             }
             if let pending = GatewayPowerPolicy.pendingTitle(item) {
-                Label(pending, systemImage: "clock.arrow.circlepath").font(.caption2).foregroundStyle(.orange)
+                Label(pending, systemImage: "clock.arrow.circlepath").font(.caption2).foregroundStyle(Signal.warn)
             }
             if let lastResult = GatewayPowerPolicy.lastResultMessage(item) {
                 Text(lastResult).font(.caption2).foregroundStyle(Color.callerDanger)
@@ -687,7 +703,7 @@ struct SettingsView: View {
                     .reportsError(lastResult, screen: "settings", site: "gateway_power_result")
             }
             if let success = GatewayPowerPolicy.lastResultSuccessMessage(item) {
-                Text(success).font(.caption2).foregroundStyle(.green)
+                Text(success).font(.caption2).foregroundStyle(Signal.call)
                     .accessibilityIdentifier("gatewayPower.lastResultSuccess")
             }
         }
@@ -1175,6 +1191,7 @@ struct SIMSettingsView: View {
 
     var body: some View {
         Form {
+            Group {
             if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
             Section {
                 TextField("显示名称", text: $labelText)
@@ -1286,7 +1303,10 @@ struct SIMSettingsView: View {
                         || settings?.isAvailable(mode) != true
                 )
             }
-        }.navigationTitle(labelText.isEmpty ? (sim.label ?? "SIM 设置") : labelText).navigationBarTitleDisplayMode(.inline)
+            }
+            .listRowBackground(Signal.surface)
+        }
+        .signalList().navigationTitle(labelText.isEmpty ? (sim.label ?? "SIM 设置") : labelText).navigationBarTitleDisplayMode(.inline)
         .task(id: "\(session.sessionIdentity?.uuidString ?? "none"):\(navigation.tab):\(scenePhase)") {
             guard let identity = session.sessionIdentity, navigation.tab == .settings, scenePhase == .active else { return }
             await refreshServerTruth(requiredIdentity: identity)
@@ -1315,10 +1335,10 @@ struct SIMSettingsView: View {
             .accessibilityIdentifier("simSettings.applyStatus")
         case .success:
             Label(status.text, systemImage: "checkmark.circle.fill")
-                .font(.footnote).foregroundStyle(.green)
+                .font(.footnote).foregroundStyle(Signal.call)
                 .accessibilityIdentifier("simSettings.applyStatus")
         case .warning:
-            Text(status.text).font(.footnote).foregroundStyle(.orange)
+            Text(status.text).font(.footnote).foregroundStyle(Signal.warn)
                 .accessibilityIdentifier("simSettings.applyStatus")
         case .none:
             EmptyView()

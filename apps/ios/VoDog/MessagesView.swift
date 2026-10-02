@@ -46,33 +46,40 @@ struct MessagesView: View {
                     )
                 } else {
                     List(conversations) { conversation in
-                        HStack(spacing: 0) {
-                            NavigationLink {
-                                ConversationView(
-                                    conversation: conversation,
-                                    messages: messages,
-                                    sims: sims,
-                                    drafts: drafts,
-                                    onRefresh: { await load(requiredIdentity: session.sessionIdentity) }
-                                )
-                            } label: {
-                                ConversationRow(conversation: conversation, sims: sims)
+                        VStack(alignment: .leading, spacing: 6) {
+                        NavigationLink {
+                            ConversationView(
+                                conversation: conversation,
+                                messages: messages,
+                                sims: sims,
+                                drafts: drafts,
+                                onRefresh: { await load(requiredIdentity: session.sessionIdentity) }
+                            )
+                        } label: {
+                            ConversationRow(conversation: conversation, sims: sims)
+                        }
+                        .navigationLinkIndicatorVisibility(.hidden)
+                        .accessibilityIdentifier("messages.conversation")
+                        // A sibling of the link (like the old (i)) so the tap copies instead of opening the thread.
+                        if let code = VerificationCodeText.code(in: conversation.latest?.body) {
+                            Button { UIPasteboard.general.string = code } label: {
+                                Label("复制验证码 \(code)", systemImage: "doc.on.doc")
+                                    .font(.footnote.weight(.semibold)).monospacedDigit()
+                                    .frame(minHeight: 32)
                             }
-                            .accessibilityIdentifier("messages.conversation")
-                            // §F: the same "i" the records list has — a sibling of the link, so it opens the
-                            // card instead of pushing the thread.
-                            Button {
+                            .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(Signal.brand)
+                            .padding(.leading, 56)
+                            .accessibilityIdentifier("messages.copyCode")
+                        }
+                        }
+                        // §F: the contact card moves from a per-row (i) into the long-press menu.
+                        .contextMenu {
+                            Button("联系人卡片", systemImage: "person.crop.circle") {
                                 card = ContactCardTarget(conversation: conversation)
-                            } label: {
-                                Image(systemName: "info.circle")
-                                    .font(.title3)
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
                             }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("\(conversation.displayTitle) 的联系人卡片")
                             .accessibilityIdentifier("messages.contactCard")
                         }
+                        .accessibilityAction(named: Text("联系人卡片")) { card = ContactCardTarget(conversation: conversation) }
                         // S30: 删除 is declared first, which is what puts it against the trailing edge — SwiftUI
                         // lays trailing swipe buttons out from the edge inward in declaration order. 删除并屏蔽
                         // is therefore the inner, harder-to-hit one, which is the right way round for the action
@@ -99,8 +106,10 @@ struct MessagesView: View {
                             }
                         }
                         .disabled(threadBusyID == conversation.id.id)
+                        .listRowBackground(Signal.surface)
                     }
                     .listStyle(.insetGrouped)
+                    .signalList()
                     .refreshable { await load(requiredIdentity: session.sessionIdentity) }
                     .confirmationDialog(
                         ThreadSwipeActionPolicy.deleteConfirmTitle,
@@ -142,7 +151,7 @@ struct MessagesView: View {
                 Text(ThreadSwipeActionPolicy.deleteAndBlockConfirmMessage)
                 if let reason = availability.reason { Text(reason) }
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(Signal.bg)
             .navigationTitle("短信")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
@@ -315,78 +324,78 @@ private struct ConversationRow: View {
         UnreadDotPolicy.conversationUnread(conversation.messages, locallyRead: BadgeStore.shared.readSMSIDs)
     }
 
-    private var identity: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+    private var unreadTitle: some View {
+        HStack(spacing: 6) {
             if conversation.blocked {
                 Image(systemName: ContactDisplay.blockedSymbol)
-                    .foregroundStyle(Color.callerDanger)
+                    .foregroundStyle(Signal.danger)
                     .accessibilityHidden(true)
             }
-            // Keep the complete number/name readable when the date moves to its own line.
             Text(conversation.displayTitle)
-                .font(.headline)
-                .fontWeight(unread ? .bold : nil)
-                .monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
+                .font(.body.weight(unread ? .bold : .semibold))
+                .monospacedDigit().foregroundStyle(Signal.ink)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
         }
     }
 
-    private var date: some View {
-        Text(displayDate(conversation.latest?.statusDate))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-    }
-
-    private var stackedHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            identity
-            date.fixedSize(horizontal: false, vertical: true)
-        }
+    private var time: some View {
+        Text(CompactTime.text(conversation.latest?.statusDate, zone: GatewayTimeDisplay.resolvedTimeZone(callZone: nil)))
+            .font(.subheadline).monospacedDigit()
+            .foregroundStyle(unread ? Signal.brand : Signal.ink3)
+            .lineLimit(1)
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            UnreadDot(visible: unread, label: "未读").padding(.top, 6)
-            content
-        }
-    }
-
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if dynamicTypeSize >= .xxxLarge {
-                stackedHeader
-            } else {
-                ViewThatFits(in: .horizontal) {
+        let ax = dynamicTypeSize.isAccessibilitySize
+        HStack(alignment: .top, spacing: 12) {
+            Text(String(conversation.displayTitle.prefix(1)))
+                .font(.headline).foregroundStyle(Signal.ink2)
+                .frame(width: 44, height: 44).background(Signal.surface3, in: Circle())
+                .overlay(alignment: .topLeading) { if unread { UnreadDot(visible: true).offset(x: -4, y: -2) } }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                if ax {
+                    unreadTitle
+                    time
+                } else {
                     HStack(alignment: .firstTextBaseline) {
-                        identity.fixedSize(horizontal: true, vertical: false)
+                        unreadTitle
                         Spacer(minLength: 8)
-                        date.fixedSize(horizontal: true, vertical: false)
+                        time.fixedSize()
                     }
-                    stackedHeader
                 }
-            }
-            Text(conversation.latest?.body ?? "").lineLimit(2).foregroundStyle(.secondary)
-            if let latest = conversation.latest {
-                // Accessibility sizes stack the three facts; a shared line squeezed 收到 into 收/到.
-                let layout = dynamicTypeSize.isAccessibilitySize
-                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2)) : AnyLayout(HStackLayout(spacing: 8))
-                layout {
-                    // S92: explicit style — inside AnyLayout the automatic style dropped the title and left only the arrow.
-                    Label(latest.directionTitle, systemImage: latest.directionIcon).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
-                    Text(simTitle(latest.simId, in: sims))
-                    if let status = latest.statusTitleForRow { Text(status) }
+                Text(conversation.latest?.body ?? "").font(.subheadline).foregroundStyle(Signal.ink2)
+                    .lineLimit(ax ? 4 : 2)
+                if let latest = conversation.latest, latest.direction?.lowercased() == "outgoing",
+                   let status = latest.statusTitleForRow, status != "已发送", status != "已送达" {
+                    Text(status).font(.caption).foregroundStyle(Signal.warn)
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            }
-            if conversation.latest?.missingParts == true {
-                Label("短信缺少分段", systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+                if conversation.latest?.missingParts == true {
+                    Label("短信缺少分段", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(Signal.warn)
+                }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(([unread ? "未读" : nil, conversation.displayTitle, conversation.latest?.body,
+                              conversation.latest.map { displayDate($0.statusDate) },
+                              conversation.latest.map(\.directionTitle),
+                              conversation.latest.map { simTitle($0.simId, in: sims) },
+                              conversation.latest?.statusTitleForRow] as [String?])
+            .compactMap { $0 }.joined(separator: "，"))
     }
 }
+
+/// S95: client-side only — a 4–8 digit run in a message that says 验证码 / 校验码 / 动态码 / code. Copy only.
+enum VerificationCodeText {
+    static func code(in body: String?) -> String? {
+        guard let body, body.range(of: #"验证码|校验码|动态码|确认码|code"#, options: [.regularExpression, .caseInsensitive]) != nil,
+              let match = body.range(of: #"(?<![0-9])[0-9]{4,8}(?![0-9])"#, options: .regularExpression) else { return nil }
+        return String(body[match])
+    }
+}
+
 
 struct ConversationView: View {
     @Environment(SessionStore.self) private var session
@@ -441,13 +450,10 @@ struct ConversationView: View {
           GeometryReader { viewport in
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    if let caption = ConversationLineCaption.text(sim: sims.first { $0.id == conversation.id.simID }) {
-                        Text(caption)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    ForEach(currentMessages) { message in
+                    ForEach(Array(currentMessages.enumerated()), id: \.element.id) { index, message in
+                        if let separator = MessageSeparator.text(message, previous: index > 0 ? currentMessages[index - 1] : nil) {
+                            separatorView(separator, sim: index == 0 ? sims.first { $0.id == conversation.id.simID } : nil)
+                        }
                         MessageBubble(
                             message: message, sims: sims,
                             selecting: selecting, selected: selectedIDs.contains(message.id),
@@ -480,7 +486,7 @@ struct ConversationView: View {
             // Open at the newest message (and keep it in view when the reply keyboard shrinks the viewport). A
             // scrollTo in onAppear ran before the LazyVStack laid out the last row, so threads opened at the top.
             .defaultScrollAnchor(.bottom)
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(Signal.bg)
             // Scrolling the transcript away is the natural way to put the reply keyboard down.
             .scrollDismissesKeyboard(.interactively)
             .refreshable { Diag.shared.log("sms.thread_refresh", [:]); await onRefresh() }
@@ -514,17 +520,37 @@ struct ConversationView: View {
             } else {
                 // 长按气泡 is the gesture the spec asks for; this button is the same door with a label on it, and
                 // it is what UI automation can actually find.
+                // S95: the centered avatar + name is the contact card door.
+                ToolbarItem(placement: .principal) {
+                    Button { card = ContactCardTarget(conversation: conversation) } label: {
+                        HStack(spacing: 8) {
+                            Text(String(conversation.displayTitle.prefix(1)))
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(Signal.ink2)
+                                .frame(width: 30, height: 30).background(Signal.surface3, in: Circle())
+                            Text(conversation.displayTitle).font(.headline).monospacedDigit()
+                                .foregroundStyle(Signal.ink).lineLimit(1)
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Signal.ink3)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("联系人卡片，\(conversation.displayTitle)")
+                    .accessibilityIdentifier("conversation.contactCard")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(MessageSelectionPolicy.enterTitle) { selecting = true; selectedIDs = [] }
                         .disabled(currentMessages.isEmpty)
                         .accessibilityIdentifier(MessageSelectionPolicy.selectModeAccessibilityIdentifier)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { card = ContactCardTarget(conversation: conversation) } label: {
-                        Image(systemName: "info.circle")
+                    let dialNumber = conversation.replyNumber.map(PhoneNumberText.normalized) ?? ""
+                    Button {
+                        navigation.requestDial(dialNumber, simID: conversation.id.simID)
+                    } label: {
+                        Image(systemName: "phone").foregroundStyle(Signal.call)
                     }
-                    .accessibilityLabel("联系人卡片")
-                    .accessibilityIdentifier("conversation.contactCard")
+                    .disabled(dialNumber.isEmpty || !availability.canDial(on: conversation.id.simID))
+                    .accessibilityLabel("拨打")
+                    .accessibilityIdentifier("conversation.call")
                 }
             }
         }
@@ -637,9 +663,34 @@ struct ConversationView: View {
         }
     }
 
+    private func separatorView(_ text: String, sim: SIMChannel?) -> some View {
+        HStack(spacing: 5) {
+            Text(text).monospacedDigit()
+            if let sim {
+                Text("· 通过")
+                SimSwatch(color: SIMPalette.color(for: sim, in: sims))
+                Text(ConversationLineCaption.text(sim: sim) ?? "")
+            }
+        }
+        .font(.footnote).foregroundStyle(Signal.ink2)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+    }
+
     private var replyBar: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             NetworkAvailabilityNotice()
+            if let sim = sims.first(where: { $0.id == conversation.id.simID }) {
+                HStack(spacing: 6) {
+                    Text("从")
+                    SimChip(sim: sim, in: sims, compact: true, showsTail: false)
+                    Text("发送")
+                    Spacer(minLength: 0)
+                }
+                .font(.footnote).foregroundStyle(Signal.ink2)
+                .accessibilityElement(children: .combine)
+            }
             if availability.reason == nil, !canReply {
                 Text("当前号码暂不能发送，草稿仍可编辑。").font(.caption).foregroundStyle(.secondary)
             }
@@ -689,7 +740,7 @@ struct ConversationView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(Signal.bg)
         .sensoryFeedback(.success, trigger: sendFeedback)
         // The field is only focusable again once `isSending` is false *in the rendered tree*, so the re-assert
         // rides that update rather than racing it.
@@ -748,7 +799,7 @@ private struct MessageBubble: View {
     /// S87: a tapped link waits here for 「打开」. `.alert`, not `confirmationDialog` (see the S30 note at the top).
     @State private var pendingLink: URL?
 
-    private var textColor: Color { message.direction == "outgoing" ? Color.callerOnAccent : Color.primary }
+    private var textColor: Color { message.direction == "outgoing" ? Color.white : Signal.ink }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -777,16 +828,23 @@ private struct MessageBubble: View {
                         pendingLink = url
                         return .handled
                     })
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(message.direction == "outgoing" ? Color.callerAccent : Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 17))
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(message.direction == "outgoing" ? Signal.bubbleOut : Signal.surface3, in: RoundedRectangle(cornerRadius: 18))
                     .foregroundStyle(textColor)
                     // S83: the menu sits on the bubble itself so the lift preview is just the bubble. Selection
                     // mode leaves the builder empty, which shows no menu, so the tap toggle is the only gesture.
-                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 17))
+                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18))
                     .contextMenu { if !selecting { menuItems } }
-                Text(([message.directionTitle, simTitle(message.simId, in: sims)] + [message.statusTitleForRow].compactMap { $0 }).joined(separator: " · "))
-                    .font(.caption2).foregroundStyle(.secondary)
-                Text(displayDate(message.statusDate)).font(.caption2).foregroundStyle(.secondary)
+                // S95: time and line live in the separators; the bubble keeps its own delivery state.
+                if let status = message.statusTitleForRow {
+                    HStack(spacing: 4) {
+                        if ["queued", "pending", "sending"].contains(message.state?.lowercased() ?? "") {
+                            SimStatusShape(status: .pending)
+                        }
+                        Text(status)
+                    }
+                    .font(.caption).foregroundStyle(message.state?.lowercased() == "failed" ? Signal.danger : Signal.ink2)
+                }
                 if let reason = message.failureReason, !reason.isEmpty {
                     Text(reason).font(.caption2).foregroundStyle(Color.callerDanger)
                 }
@@ -883,6 +941,7 @@ struct ComposeMessageView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Group {
                 if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
                 Section("发送号码") {
                     Picker("号码", selection: $pickerSelection) {
@@ -965,7 +1024,10 @@ struct ComposeMessageView: View {
                             .reportsError(error, screen: "compose", site: "send")
                     }
                 }
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .disabled(isSending)
             .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $choosingContacts) {
@@ -1131,6 +1193,22 @@ func callLineTitle(_ simID: String?, in sims: [SIMChannel]) -> String? {
     return "\(name) · \(simGatewayIdentity(sim, shortened: true))"
 }
 
+/// S95 thread separators: a new one on the first message, a new day, or a gap of 10 minutes or more.
+enum MessageSeparator {
+    static func text(_ message: SMSMessage, previous: SMSMessage?, now: Date = .now) -> String? {
+        guard let date = message.statusDate.flatMap(GatewayTimeDisplay.parseISO) else { return previous == nil ? "—" : nil }
+        let zone = GatewayTimeDisplay.resolvedTimeZone(callZone: nil)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let previousDate = previous?.statusDate.flatMap(GatewayTimeDisplay.parseISO)
+        let newDay = previousDate.map { !calendar.isDate($0, inSameDayAs: date) } ?? true
+        if let previousDate, !newDay, date.timeIntervalSince(previousDate) < 600 { return nil }
+        let clock = String(GatewayTimeDisplay.compact(message.statusDate, timeZone: zone).suffix(5))
+        guard newDay else { return clock }
+        return "\(RecordDaySection.dayTitle(message.statusDate, zone: zone, now: now)) \(clock)"
+    }
+}
+
 enum ConversationLineCaption {
     /// One-line SIM label for a conversation thread. No device/SIM ids and no info-circle banner.
     static func text(sim: SIMChannel?) -> String? {
@@ -1186,7 +1264,7 @@ private struct ReplyComposerSurface: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
         if reduceTransparency {
-            content.background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
+            content.background(Signal.surface, in: RoundedRectangle(cornerRadius: 22))
         } else if #available(iOS 26.0, *) {
             content.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 22))
         } else {

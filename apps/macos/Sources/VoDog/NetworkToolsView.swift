@@ -69,7 +69,6 @@ private struct VoWiFiView: View {
         ResizableCommunicationSplit(sidebarWidth: $sidebarWidth) {
             sidebar
                 .communicationSidebarColumnStyle()
-                .communicationModuleFloatingSidebar()
         } detail: {
             detail
                 .communicationDetailColumnStyle()
@@ -167,7 +166,7 @@ private struct VoWiFiModuleRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle().fill(VoWiFiStatusStyle.color(for: state)).frame(width: 8, height: 8)
+            Circle().selectionTint(VoWiFiStatusStyle.color(for: state)).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 3) {
                 Text(verbatim: module.localizedDisplayName).lineLimit(1)
                 Text(verbatim: state.localizedShortTitle)

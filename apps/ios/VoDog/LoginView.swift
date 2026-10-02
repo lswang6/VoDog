@@ -104,7 +104,7 @@ struct LoginView: View {
                 .autocorrectionDisabled()
                 .padding(12)
                 .frame(minHeight: 44)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                .background(Signal.surface, in: RoundedRectangle(cornerRadius: 12))
             passwordField
             if let message = turnstile.loginFailureMessage {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -192,7 +192,7 @@ struct LoginView: View {
         .padding(.leading, 12)
         .padding(.trailing, 4)
         .frame(minHeight: 44)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(Signal.surface, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var passkeyCard: some View {
@@ -263,7 +263,7 @@ private extension View {
     func callerMaterialCard(colorScheme: ColorScheme, reduceTransparency: Bool) -> some View {
         background {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(reduceTransparency ? Color(uiColor: .secondarySystemGroupedBackground) : Color.clear)
+                .fill(reduceTransparency ? Signal.surface : Color.clear)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .overlay(

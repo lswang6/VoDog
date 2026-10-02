@@ -9,6 +9,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -84,6 +86,7 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SettingsPage(
     state: ClientUiState,
@@ -154,24 +157,13 @@ internal fun SettingsPage(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
         item { InlineSectionHeader("外观") }
-        item { AppearancePicker() }
-        item { InlineSectionHeader("角标") }
-        item {
-            BadgeSettingsSection(model, needsPermission = !notificationsAllowed && Build.VERSION.SDK_INT >= 33) {
-                backgroundPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+        item { SettingsCard { Box(Modifier.padding(ScreenPadding)) { AppearancePicker() } } }
+        // S24 决策 3: right after SIM 与接听模式, like iOS. Hidden entirely on a Control that predates S24.
+        if (!state.voiceProviderUnavailable) {
+            item { InlineSectionHeader("通用") }
+            item { VoiceProviderSection(state, model) }
         }
-        item { InlineSectionHeader("账号") }
-        item {
-            SettingsCard {
-                SettingsRow("用户名", state.session?.username ?: "未登录")
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingsRow("角色", roleDisplayLabel(state.session?.role.orEmpty()))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingsRow("当前会话", "Android App")
-            }
-        }
-        item { InlineSectionHeader("SIM 与接听模式") }
+        item { InlineSectionHeader("SIM 卡") }
         when (val simState = state.sims) {
             RemoteList.NotLoaded, RemoteList.Loading -> item { LoadingRow("正在读取号码…") }
             is RemoteList.Failed -> item {
@@ -185,38 +177,63 @@ internal fun SettingsPage(
                 item { EmptyCard("没有已分配的 SIM", Modifier) }
             } else items(displayedSims, key = { it.optString("id") }) { sim ->
             val settings = sim.optJSONObject("settings") ?: JSONObject()
+            val clientSim = runCatching { sim.toClientSim() }.getOrNull()
+            val allSims = sims.mapNotNull { runCatching { it.toClientSim() }.getOrNull() }
+            val versions = sim.simSettingsVersions()
+            val pending = versions.appliedVersion != null && versions.appliedVersion < versions.version
+            val online = state.networkAvailable && sim.optBoolean("online")
+            val signal = LocalSignal.current
             Card(
                 onClick = { selectedSimId = sim.optString("id") },
                 modifier = Modifier.fillMaxWidth().testTag("settings.sim.${sim.optString("id")}"),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             ) {
                 ListItem(
-                    modifier = Modifier.heightIn(min = TouchTarget),
+                    modifier = Modifier.heightIn(min = 64.dp),
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    leadingContent = { clientSim?.let { LineBlock(simColor(it, allSims), 14.dp) } },
                     headlineContent = {
-                        Text(
-                            sim.optString("phoneLabel").takeIf { it.isNotBlank() && it != "null" }
-                                ?: sim.optString("label", "SIM"),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                        // S95b §A: full AiBadge after the name; FlowRow lets it wrap under the name at large font scales.
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                clientSim?.let(::simPickerTitle) ?: sim.optString("label", "SIM"),
+                                style = MaterialTheme.typography.bodyLarge.copy(fontSize = MaterialTheme.typography.titleMedium.fontSize),
+                            )
+                            AiBadge(settings.optString("mode"), settings.timeoutSecondsOrNull(), compact = false)
+                        }
                     },
                     supportingContent = {
                         Column {
+                            if (pending) Text("已保存，等待设备应用", style = MaterialTheme.typography.bodyMedium, color = signal.warn)
                             Text(
-                                "${sim.optString("label", "SIM")} · ${simConnectionLabel(state.networkAvailable, sim.optBoolean("online"))} · ${modeDisplayLabel(settings.optString("mode"))}",
-                                style = MaterialTheme.typography.labelSmall,
+                                listOfNotNull(
+                                    sim.optString("phoneLabel").takeIf { it.isNotBlank() && it != "null" },
+                                    // AI modes are carried by the badge; 人工 stays plain text (§A).
+                                    settings.optString("mode").takeIf { aiBadgeText(it) == null }?.let(::modeDisplayLabel),
+                                ).joinToString(" · "),
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             // 号码所在设备（与 iOS SIMIdentityDetail 一致）；顶部胶囊不再显示设备短号。
                             Text(
-                                "设备：${runCatching { sim.toClientSim().gatewayFullLabel }.getOrDefault("网关身份待确认")}",
-                                style = MaterialTheme.typography.labelSmall,
+                                "${clientSim?.let(::simDeviceLabel) ?: "设备待确认"} · ${simConnectionLabel(state.networkAvailable, sim.optBoolean("online"))}",
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     },
                     trailingContent = {
-                        Icon(Icons.Filled.ChevronRight, contentDescription = "打开 SIM 设置", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            StatusShape(
+                                when {
+                                    pending -> LineStatus.PENDING
+                                    online -> LineStatus.ONLINE
+                                    else -> LineStatus.OFFLINE
+                                },
+                                10.dp,
+                            )
+                            Icon(Icons.Filled.ChevronRight, contentDescription = "打开 SIM 设置", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     },
                 )
             }
@@ -231,12 +248,7 @@ internal fun SettingsPage(
                 )
             }
         }
-        // S24 决策 3: right after SIM 与接听模式, like iOS. Hidden entirely on a Control that predates S24.
-        if (!state.voiceProviderUnavailable) {
-            item { InlineSectionHeader("AI 语音服务") }
-            item { VoiceProviderSection(state, model) }
-        }
-        item { InlineSectionHeader("已屏蔽号码") }
+        item { InlineSectionHeader("隐私与安全") }
         item {
             Card(
                 onClick = { managingBlocklist = true },
@@ -255,7 +267,6 @@ internal fun SettingsPage(
                 )
             }
         }
-        item { InlineSectionHeader("通行密钥") }
         item {
             SettingsCard {
                 Column(Modifier.padding(ScreenPadding), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -297,6 +308,12 @@ internal fun SettingsPage(
                         )
                     }
                 }
+            }
+        }
+        item { InlineSectionHeader("角标") }
+        item {
+            BadgeSettingsSection(model, needsPermission = !notificationsAllowed && Build.VERSION.SDK_INT >= 33) {
+                backgroundPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
         item { InlineSectionHeader("网关设备") }
@@ -380,17 +397,23 @@ internal fun SettingsPage(
                 Text("刷新应用状态")
             }
         }
-        item { InlineSectionHeader("退出登录") }
+        item { InlineSectionHeader("账号") }
         item {
             SettingsCard {
+                SettingsRow("用户名", state.session?.username ?: "未登录")
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsRow("角色", roleDisplayLabel(state.session?.role.orEmpty()))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsRow("当前会话", "Android App")
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 TextButton(
                     onClick = model::logout,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = TouchTarget)
+                        .heightIn(min = 56.dp)
                         .testTag("settings.logout"),
                     colors = destructiveTextColors(),
-                ) { Text("退出登录") }
+                ) { Text("退出登录", style = MaterialTheme.typography.titleMedium) }
             }
         }
             // state.message is already banner-ed by Workspace above the tab body; no second copy here.
@@ -1237,6 +1260,7 @@ internal fun SimSettingsCard(
         "${modeDisplayLabel(settings.optString("mode"))} · " +
             SettingsApplyPolicy.subtitle(applyState, applied, version),
     ) {
+        AiBadge(settings.optString("mode"), settings.timeoutSecondsOrNull(), compact = false)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().heightIn(min = TouchTarget)) {
             choices.forEachIndexed { index, (value, label) ->
                 SegmentedButton(
@@ -1356,3 +1380,6 @@ internal fun blocklistSummary(calls: RemoteList, sms: RemoteList): String = when
 internal fun blocklistUnblockMessage(number: String, scope: String): String =
     if (scope == ClientApiRoutes.BLOCK_SCOPE_SMS) "$number 将移出短信黑名单，之后的短信重新进入收件箱。"
     else "$number 将移出来电黑名单，来电不再被挂断。"
+
+/** The stored timeout for the full AiBadge, or null when the settings JSON has none. */
+private fun JSONObject.timeoutSecondsOrNull(): Int? = if (has("timeoutSeconds") && !isNull("timeoutSeconds")) optInt("timeoutSeconds") else null

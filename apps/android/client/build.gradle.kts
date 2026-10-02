@@ -55,8 +55,8 @@ android {
         applicationId = "org.vodog"
         minSdk = 29
         targetSdk = 36
-        versionCode = 68
-        versionName = "0.68.0-s94b"
+        versionCode = 72
+        versionName = "0.72.0-s95b-signal-ui"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", endpointLiteral(productionApiBaseUrl))
         // S72b（同 S71 网关）：默认网络是蜂窝时走 relay-node 国内中转。

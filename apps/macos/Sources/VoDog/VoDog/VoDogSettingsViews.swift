@@ -121,12 +121,14 @@ struct VoDogNumbersView: View {
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(sim.displayName).font(.body.weight(selected ? .semibold : .regular))
-                    Text([sim.phoneLabel, VoDogReceptionMode(rawValue: sim.settings?.mode ?? "")?.title]
+                    // AI modes are carried by the badge; 人工接听 stays plain text.
+                    Text([sim.phoneLabel, sim.settings?.mode == VoDogReceptionMode.normal.rawValue
+                          ? VoDogReceptionMode.normal.title : nil]
                         .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                VoDogAnswerModeBadge(mode: sim.settings?.mode)
+                AiBadge(settings: sim.settings, full: true)
                 let online = VoDogPhonePolicy.showsOnline(sim, fresh: loadError == nil)
                 Circle().fill(online ? Color.green : Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
                     .help(online ? L10n.tr("在线") : L10n.tr("离线"))

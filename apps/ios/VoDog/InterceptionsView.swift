@@ -64,6 +64,7 @@ struct InterceptionsView: View {
     private var content: some View {
         @Bindable var store = store
         return List {
+            Group {
             if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
             if blocklistOnly {
                 Section {
@@ -173,7 +174,10 @@ struct InterceptionsView: View {
                     }
                 }
             }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .keyboardDoneToolbar()
         .refreshable { await loadAll() }
         .onChange(of: scope) {

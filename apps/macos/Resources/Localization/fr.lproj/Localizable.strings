@@ -585,7 +585,6 @@
 "CDC-ECM 写入后的读回校验失败，未重启模块。" = "Échec de la relecture après écriture de CDC-ECM. Le module n’a pas redémarré.";
 "CLCC 中没有找到本次通话。" = "Cet appel est introuvable dans CLCC.";
 "CSQ 换算 · %lld dBm" = "Conversion CSQ · %lld dBm";
-"VoDog 会在%@中写入并回读 IMS=%lld，校验成功后再重启模块。蜂窝网络将短暂中断。" = "VoDog écrira dans %@ puis relira IMS=%lld avant de redémarrer le module après validation. Le réseau cellulaire sera brièvement interrompu.";
 "VoDog 将把 usbnet 从 0 切换为 1。写入回读成功后模块会重启一次，蜂窝网络将短暂中断。" = "VoDog fera passer usbnet de 0 à 1. Après une relecture réussie, le module redémarrera et le réseau cellulaire sera brièvement interrompu.";
 "VoDog 必须位于“应用程序”文件夹中，才能安全安装网络 helper。" = "VoDog doit se trouver dans le dossier « Applications » pour installer le helper réseau en toute sécurité.";
 "VoDog 授权签名公钥无效。" = "La clé publique de signature des licences VoDog est invalide.";
@@ -1889,3 +1888,40 @@
 "通话中 · 由 %@ 接听 · 自 %@" = "En appel · répondu sur %@ · depuis %@";
 "同一设备上的两张卡不能互打" = "Deux SIM du même appareil ne peuvent pas s'appeler";
 "这是你正在拨出的通话" = "C'est l'appel que vous passez";
+
+/* S95 Signal UI */
+"SIM 与 eSIM" = "SIM et eSIM";
+"不在通讯录" = "Absent des contacts";
+"去电" = "Appel sortant";
+"复制验证码" = "Copier le code";
+"已同步" = "Synchronisé";
+"已复制" = "Copié";
+"已配对 · 在线" = "Associé · En ligne";
+"已配对 · 离线" = "Associé · Hors ligne";
+"拔出模组或退出应用，此号码会显示为『号码设备离线』" = "Si vous débranchez le module ou quittez l’app, ce numéro apparaîtra comme « Appareil du numéro hors ligne ».";
+"无人接听，%lld 秒后由 AI 代接" = "Sans réponse, l’IA répond dans %lld s";
+"更多" = "Plus";
+"最新验证码" = "Dernier code";
+"服务器下发的 SIM 设置" = "Réglages SIM envoyés par le serveur";
+"未登录" = "Déconnecté";
+"本 Mac 作为 %@ 的网关" = "Ce Mac est la passerelle de %@";
+"网络" = "Réseau";
+"网络与代理" = "Réseau et proxy";
+"设备" = "Appareils";
+"设置版本" = "Version des réglages";
+"输入号码或姓名" = "Saisir un numéro ou un nom";
+"通信" = "Communication";
+"通信服务" = "Services de communication";
+"通话" = "Appels";
+"通过 %@ 接收" = "Reçu via %@";
+"配对状态" = "Association";
+"删除会话" = "Supprimer la conversation";
+"VoDog 会在%@中更改接收来电设置并回读校验，成功后再重启模块。蜂窝网络将短暂中断。" = "VoDog modifiera le réglage des appels entrants sur %@ et le relira pour le vérifier, puis redémarrera le module. Le réseau cellulaire sera brièvement interrompu.";
+"AI 代接" = "Réponse IA";
+"AI · %lld 秒后" = "IA · après %lld s";
+"AI 兜底" = "IA en relais";
+"AI 代接已开启，立即由 AI 接听" = "Réponse IA activée : l’IA décroche immédiatement";
+"AI 代接已开启，响铃 %lld 秒无人接听后由 AI 接听" = "Réponse IA activée : l’IA décroche après %lld secondes de sonnerie sans réponse";
+"AI 代接已开启，响铃无人接听后由 AI 接听" = "Réponse IA activée : l’IA décroche si personne ne répond";
+"v%lld 已应用" = "v%lld appliquée";
+"v%lld 待设备应用" = "v%lld en attente sur l’appareil";

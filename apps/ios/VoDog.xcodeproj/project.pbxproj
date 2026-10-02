@@ -68,6 +68,7 @@
 		8E2E42A09626E5F1FDF61F10 /* S81ClientPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E68D7547D048203F720E22F /* S81ClientPolicyTests.swift */; };
 		8F91A6E6DD5C291C336AE2E5 /* MediaRetryPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85D68B27624E8CC88B8D1E72 /* MediaRetryPolicyTests.swift */; };
 		929C9CC8EB4149CBEDBDAC43 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7163052BBC543B22C6173FCC /* App.swift */; };
+		92D15C74BD3B1BBA81DE7793 /* SignalPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC58944F5EE60739AFBAFEA5 /* SignalPresentationTests.swift */; };
 		958B846D1671A861EE016C75 /* Diag.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A39494320CB5134F2441C1 /* Diag.swift */; };
 		958F1C4F70D981C46BB0959B /* MediaGracePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E5D2A4AFE5C5CA3C72878DC /* MediaGracePolicyTests.swift */; };
 		9A49085FADFFD03057A3E93A /* DeviceWalkthroughUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0FCB896F174977342A108EB /* DeviceWalkthroughUITests.swift */; };
@@ -213,6 +214,7 @@
 		A896B4B0E068DEF006B4FDDE /* PasskeyDisplayPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasskeyDisplayPolicy.swift; sourceTree = "<group>"; };
 		A94D0F5AEB9ADDA4DB64A5A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		AAAD60384A7D50703AC76FDE /* OpusOfferPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpusOfferPolicy.swift; sourceTree = "<group>"; };
+		AC58944F5EE60739AFBAFEA5 /* SignalPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalPresentationTests.swift; sourceTree = "<group>"; };
 		B1DDFCD279E41DFF7955EB8B /* PasskeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasskeyService.swift; sourceTree = "<group>"; };
 		B26A5FBC38BD9781241E76FE /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		B2CAE6B1CA03E5785C646B7B /* BlocklistClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlocklistClient.swift; sourceTree = "<group>"; };
@@ -411,6 +413,7 @@
 				551E3A79F50C667C5FEC7595 /* S87ClientPolicyTests.swift */,
 				711EF816235E860527455A40 /* S89ClientPolicyTests.swift */,
 				E0B71EF064B7A176552B2676 /* SettingsApplyPolicyTests.swift */,
+				AC58944F5EE60739AFBAFEA5 /* SignalPresentationTests.swift */,
 				797630E597A74F775F953A19 /* SIMStripDisplayPolicyTests.swift */,
 				DE98BC0AC61286EEBC3203F7 /* ThemeContrastTests.swift */,
 				3B5CC58D969E4E540C8FF348 /* WalkthroughDisplayPolicyTests.swift */,
@@ -598,6 +601,7 @@
 				A18EA2B517D382C4E64379C9 /* S89ClientPolicyTests.swift in Sources */,
 				7440A3D8117114188DB89250 /* SIMStripDisplayPolicyTests.swift in Sources */,
 				72503F570F94F10470FAA0BD /* SettingsApplyPolicyTests.swift in Sources */,
+				92D15C74BD3B1BBA81DE7793 /* SignalPresentationTests.swift in Sources */,
 				1350C2156EE9CE595F3CD25C /* ThemeContrastTests.swift in Sources */,
 				B803E05CA7791C916B3709FD /* WalkthroughDisplayPolicyTests.swift in Sources */,
 			);

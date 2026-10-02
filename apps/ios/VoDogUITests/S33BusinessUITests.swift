@@ -227,7 +227,7 @@ final class S33BusinessUITests: XCTestCase {
         app.navigationBars["通话详情"].buttons.firstMatch.tap()
 
         // Exercise every period offered by the native report contract, then capture the populated report.
-        app.buttons["报告"].tap()
+        app.segmentedControls["records.tab"].buttons["转录报告"].tap()
         let reportRange = app.descendants(matching: .any)["records.reportRange"]
         for period in ["今天", "7 天", "30 天", "自定义"] {
             XCTAssertTrue(reportRange.waitForExistence(timeout: 5))
@@ -253,7 +253,7 @@ final class S33BusinessUITests: XCTestCase {
         app.navigationBars["通话详情"].buttons.firstMatch.tap()
 
         // A detail that another client deletes must close its authoritative content and stop any media surface.
-        app.buttons["全部通话"].tap()
+        app.segmentedControls["records.tab"].buttons["通话"].tap()
         replaceText(revealSearchField(in: app), with: "2025550111")
         XCTAssertTrue(app.buttons["records.callDetail"].firstMatch.waitForExistence(timeout: 10))
         app.buttons["records.callDetail"].firstMatch.tap()
@@ -264,7 +264,7 @@ final class S33BusinessUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["记录"].waitForExistence(timeout: 5))
 
         // All-SIM interception rows carry the server-resolved SIM and timezone for that individual event.
-        app.buttons["拦截记录"].tap()
+        app.segmentedControls["records.tab"].buttons["拦截"].tap()
         let unblock = app.buttons["blocklist.unblock"].firstMatch
         XCTAssertTrue(unblock.waitForExistence(timeout: 10))
         unblock.tap()
@@ -840,7 +840,7 @@ final class S33BusinessUITests: XCTestCase {
 
         let app = launchApp()
         ensureLoggedIn(app)
-        selectTab("通话", in: app)
+        selectTab("电话", in: app)
         XCTAssertTrue(app.navigationBars["电话"].waitForExistence(timeout: 8))
 
         _ = try await fixture.peer(action: "requestCounters.reset")

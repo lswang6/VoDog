@@ -1,0 +1,179 @@
+/* S95 Signal — 记录 area: unified call row, list + detail pane, recording player, transcript, reports,
+   interceptions, pager. Token variables only (tokens/web.css); selectors are scoped so the order against
+   style.css does not matter. */
+
+/* ── Unified call row (also the 电话 page recent list) ─────────────────────────────── */
+.record.call-record{position:relative;display:block;padding:10px 12px;margin:0;border:0;border-radius:var(--radius-control);transition:background-color .12s}
+.record.call-record+.record.call-record{margin-top:2px}
+.record.call-record[tabindex]:hover{background:var(--surface-2)}
+.record.call-record.selected{background:var(--brand-soft)}
+.record.call-record[tabindex]:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.record.call-record>.call-record-heading{display:grid!important;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:12px}
+.call-dir{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-size:16px;font-weight:700;line-height:1;background:var(--surface-2);color:var(--ink-2)}
+.call-dir-outgoing{background:var(--brand-soft);color:var(--brand)}
+.call-dir-missed,.call-dir-blocked{background:var(--danger-soft);color:var(--danger)}
+.call-dir-ai{background:var(--ai-soft);color:var(--ai)}
+.record.call-record.selected .call-dir-incoming{background:var(--surface)}
+.call-dir .blocked-mark{margin:0;vertical-align:0;color:inherit}
+.call-dir .blocked-mark .ui-icon{width:18px;height:18px}
+.record.call-record .call-record-number{display:grid!important;gap:3px;min-width:0}
+.record.call-record .call-record-number strong{font-size:15px;font-weight:600;line-height:1.35;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.record.call-record.call-kind-missed .call-record-number strong{color:var(--danger)}
+.call-record-number .call-unread-dot{display:inline-block;margin-right:6px;vertical-align:2px}
+.call-record-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0;font-size:12.5px;color:var(--ink-3)}
+.call-record-line small,.call-record-line .call-record-remote{font-size:12.5px;color:var(--ink-3)}
+.call-record-line small.missed{color:var(--ink-3)}
+.call-record-remote::after{content:" ·"}
+.record.call-record .call-record-sim{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-3)}
+.call-record-sim .sim-chip{max-width:180px}
+.record.call-record .call-record-meta{display:flex;align-items:center;gap:6px}
+.record.call-record .call-record-meta time{font-size:12.5px;color:var(--ink-3);white-space:nowrap}
+.record.call-record>.call-owner,.record.call-record>.call-ai-status{margin:6px 0 0 52px;font-size:13px;color:var(--ink-2)}
+.record.call-record>.record-actions,.record.call-record>.record-media-actions{margin:10px 0 2px 52px}
+.record-tag{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:var(--radius-tag);background:var(--surface-2);color:var(--ink-2);font-size:11.5px;font-weight:600;white-space:nowrap}
+.record-tag.tag-ai{background:var(--ai-soft);color:var(--ai)}
+.call-group-label{margin:14px 12px 6px;font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--ink-3)}
+.call-list>.call-group-label:first-child{margin-top:4px}
+
+/* ── 通话记录 panel: search, wide split (>1000px) ──────────────────────────────────── */
+.call-history .records-title{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.call-history .call-search{display:block;font-size:0;margin:0 0 8px}
+.call-history .call-search input{width:100%;height:44px;padding:0 14px;border:1px solid transparent;border-radius:var(--radius-control);background:var(--surface-2);color:var(--ink);font-size:14px}
+.call-history .call-search input:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.call-history>.records-list-pane>.note,.call-history>.records-list-pane>.pager+.note{margin:10px 12px 0;font-size:12.5px;color:var(--ink-3)}
+.panel.call-history.records-split{display:grid;grid-template-columns:minmax(340px,420px) minmax(0,1fr);align-items:start;gap:24px;padding:0;background:transparent;border:0;box-shadow:none}
+.records-split>.records-list-pane,.records-split>.records-detail-pane{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-card);box-shadow:var(--shadow-card)}
+.records-split>.records-list-pane{padding:16px 12px}
+.records-split>.records-detail-pane{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto;padding:28px 32px}
+.records-split .call-record-gateway{display:none}
+/* Hover/focus reveals the row's quick actions (回拨 / 短信 / 更多) over the time column. */
+:is(.records-split,.call-list-compact) .record.call-record>.history-call-actions{position:absolute;top:50%;right:8px;transform:translateY(-50%);z-index:2;display:none!important;margin:0;padding:4px;gap:4px!important;border-radius:var(--radius-control);background:var(--surface-2);box-shadow:var(--shadow-card)}
+:is(.records-split,.call-list-compact) .record.call-record:is(:hover,:focus-visible,:has(:focus-visible))>.history-call-actions{display:flex!important}
+:is(.records-split,.call-list-compact) .record.call-record>.history-call-actions:has(.confirm-action,.more-actions[open]){position:static;transform:none;display:flex!important;margin:8px 0 0 52px;box-shadow:none}
+:is(.records-split,.call-list-compact) .record.call-record>.history-call-actions>.passkey,:is(.records-split,.call-list-compact) .record.call-record>.history-call-actions .more-actions>summary{min-height:44px;padding:0 12px;margin:0;border:0;border-radius:10px;background:var(--surface);color:var(--ink);font-size:13.5px;font-weight:600}
+
+/* ── Detail pane ───────────────────────────────────────────────────────────────── */
+.records-detail-pane>.empty{padding:48px 16px;text-align:center;color:var(--ink-3)}
+.call-detail{display:grid;gap:20px}
+.call-detail-head{display:grid;grid-template-columns:64px minmax(0,1fr);align-items:center;gap:18px}
+.call-avatar{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;font-size:24px;font-weight:700;background:var(--surface-3);color:var(--ink-2)}
+.call-avatar .ui-icon{width:26px;height:26px}
+.call-detail-title{min-width:0}
+.call-detail-title h3{margin:0;font-size:22px;line-height:28px;font-weight:700;color:var(--ink);overflow-wrap:anywhere}
+.call-detail-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:6px 0 0;font-size:13.5px;color:var(--ink-3)}
+.call-detail-meta small{font-size:13.5px;color:var(--ink-3)}
+.call-detail-meta>:not(.call-record-sim)+:not(.call-record-sim)::before{content:"· ";color:var(--ink-3)}
+.call-detail>.call-owner,.call-detail>.call-ai-status{margin:-8px 0 0;font-size:13px;color:var(--ink-2)}
+.history-call-actions.history-call-actions-detail{display:flex!important;flex-wrap:wrap;gap:8px!important;margin:0}
+.history-call-actions-detail>.passkey,.history-call-actions-detail .more-actions>summary{min-height:44px;padding:0 16px;margin:0;border:0;border-radius:var(--radius-control);background:transparent;color:var(--ink);font-size:15px;font-weight:600}
+.history-call-actions-detail>.passkey:hover:not(:disabled),.history-call-actions-detail .more-actions>summary:hover{background:var(--surface-2);color:var(--ink)}
+.history-call-actions-detail>.passkey.call-primary{background:var(--call-fill);color:#fff}
+.history-call-actions-detail>.passkey.call-primary:hover:not(:disabled){background:var(--call-fill);filter:brightness(1.06);color:#fff}
+.history-call-actions-detail>.passkey:disabled{opacity:.5}
+.call-detail h4{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:17px;line-height:22px;font-weight:600;color:var(--ink)}
+.record-card{padding:18px 20px;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface)}
+.call-detail-recording .call-recording{margin:0}
+.call-detail-recording .call-recording>.passkey,.call-detail-transcript .report-transcript>.passkey{min-height:36px;margin:0;padding:0 12px;border:0;border-radius:10px;background:var(--surface-2);color:var(--ink-2);font-size:13px;font-weight:600}
+.call-detail-transcript .report-transcript+.report-transcript{margin-top:12px}
+
+/* ── Recording player ─────────────────────────────────────────────────────────── */
+.call-recording .recording-sources{display:inline-flex!important;flex-wrap:wrap;gap:2px!important;padding:3px;margin:12px 0 4px;border-radius:11px;background:var(--surface-2)}
+.call-recording .recording-sources button{flex:0 1 auto!important;min-height:38px;margin:0;padding:0 14px;border:0;border-radius:9px;background:transparent;color:var(--ink-2);font-size:13.5px;font-weight:600;box-shadow:none}
+.call-recording .recording-sources button[aria-pressed=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+:root[data-theme=dark] .call-recording .recording-sources button[aria-pressed=true]{background:var(--surface-3)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .call-recording .recording-sources button[aria-pressed=true]{background:var(--surface-3)}}
+.recording-pair-controls{display:flex!important;flex-wrap:wrap;align-items:center;gap:10px 14px!important}
+.recording-pair-controls .play-toggle{flex:none;width:52px;height:52px;min-height:52px;padding:0;margin:0;border:0;border-radius:50%;background:var(--brand);color:var(--on-brand);font-size:0;display:grid;place-items:center}
+.recording-pair-controls .play-toggle::before{content:"";width:0;height:0;margin-left:4px;border-style:solid;border-width:9px 0 9px 15px;border-color:transparent transparent transparent currentColor}
+.recording-pair-controls .play-toggle.playing::before{width:14px;height:18px;margin:0;border:0;border-left:5px solid currentColor;border-right:5px solid currentColor;box-sizing:border-box}
+.recording-pair-controls .play-toggle:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+.recording-progress{position:relative;flex:1 1 200px;min-width:140px;height:44px;display:flex;align-items:center}
+.recording-progress input[type=range]{width:100%;height:6px;margin:0;-webkit-appearance:none;appearance:none;border-radius:3px;background:linear-gradient(90deg,var(--brand) var(--played,0%),var(--surface-3) var(--played,0%));cursor:pointer}
+.recording-progress input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--brand);border:2px solid var(--surface)}
+.recording-progress input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--brand);border:2px solid var(--surface)}
+.recording-progress input[type=range]:disabled{cursor:default;opacity:.6}
+.recording-progress.has-waveform input[type=range]{position:absolute;inset:0;height:100%;opacity:0}
+.recording-progress.has-waveform:focus-within{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
+.recording-waveform{display:flex;align-items:center;gap:2px;width:100%;height:36px}
+.recording-waveform span{flex:1 1 0;min-width:1px;border-radius:1px;background:var(--surface-3)}
+.recording-waveform span.played{background:var(--brand)}
+.recording-pair-controls .recording-duration{font-size:13.5px;color:var(--ink-3);white-space:nowrap}
+.recording-pair-controls .recording-rate,.recording-pair-controls .recording-download .passkey{min-height:44px;margin:0;padding:0 12px;border:0;border-radius:10px;background:var(--surface-2);color:var(--ink);font-size:13.5px;font-weight:600}
+.recording-pair-controls .recording-download{display:flex;align-items:center;gap:8px}
+.recording-pair-controls .recording-download .note{display:none}
+.combined-recording>strong{font-size:14px;font-weight:600;color:var(--ink)}
+.combined-recording>.note,.call-recording .note{font-size:12.5px;color:var(--ink-3)}
+
+/* ── Transcript ───────────────────────────────────────────────────────────────── */
+.transcript-detail{display:grid;gap:2px;margin-top:12px}
+.transcript-detail .transcript-summary{margin:0 0 10px;padding:14px 18px;border-radius:var(--radius-control);background:var(--ai-soft);color:var(--ink);font-size:14.5px;line-height:1.6}
+.transcript-summary>strong{margin-right:12px;color:var(--ai);font-weight:700}
+.transcript-detail .transcript-line,.ai-transcript .ai-turn{display:grid;grid-template-columns:56px 64px minmax(0,1fr);gap:10px;margin:0;padding:6px 0;font-size:14px;line-height:1.6;color:var(--ink)}
+.transcript-time,.ai-turn-time{padding-top:2px;font-size:12px;color:var(--ink-3)}
+.transcript-line>strong,.ai-turn>strong{font-size:13px;font-weight:650;color:var(--ink)}
+.ai-transcript .ai-turn-ai>strong{color:var(--ai)}
+.transcript-detail>.note,.ai-transcript>.note{margin-top:10px;font-size:12.5px;color:var(--ink-3)}
+.ai-transcript{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.ai-transcript h3{margin:0 0 6px;font-size:14px;font-weight:650;color:var(--ai)}
+@media (max-width:600px){
+  .transcript-detail .transcript-line,.ai-transcript .ai-turn{grid-template-columns:44px minmax(0,1fr)}
+  .transcript-line>.transcript-text,.ai-turn>.ai-turn-text{grid-column:1/-1}
+  .record.call-record>.call-owner,.record.call-record>.call-ai-status,.record.call-record>.record-actions,.record.call-record>.record-media-actions{margin-left:0}
+}
+
+/* ── 转录报告 cards ───────────────────────────────────────────────────────────── */
+.call-reports .report-list{display:grid;gap:12px}
+.call-reports .report-card{padding:16px 18px;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface)}
+.call-reports .report-card-heading{display:flex;align-items:baseline;gap:10px}
+.call-reports .report-card-heading strong{flex:1;min-width:0;font-size:15px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.call-reports .report-card-heading time{font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.call-reports .report-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:4px 0 0;font-size:12.5px;color:var(--ink-3)}
+.call-reports .report-summary{margin:10px 0 0;padding:12px 14px;border-radius:var(--radius-control);background:var(--ai-soft);color:var(--ink);font-size:14px;line-height:1.6}
+.call-reports .report-summary.muted{background:var(--surface-2);color:var(--ink-3)}
+.call-reports .report-search input{border-radius:var(--radius-control);background:var(--surface-2)}
+
+/* ── 拦截记录 rows ─────────────────────────────────────────────────────────────── */
+.interceptions-panel .interception-list{display:grid;gap:2px}
+.interceptions-panel .record.interception-row{grid-template-columns:40px minmax(0,1fr) auto;align-items:center;padding:10px 12px;border:0;border-radius:var(--radius-control);background:transparent;color:var(--ink)}
+.interceptions-panel .record.interception-row:hover:not(:disabled){background:var(--surface-2)}
+.interceptions-panel .record.interception-row:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.interceptions-panel .interception-icon{width:40px;height:40px;background:var(--danger-soft);color:var(--danger)}
+.interceptions-panel .interception-body strong{font-size:15px;font-weight:600}
+.interceptions-panel .interception-body small,.interceptions-panel .interception-preview,.interceptions-panel .interception-row time{font-size:12.5px;color:var(--ink-3)}
+
+/* ── Pager: 第 x / y 页 · 共 n 条 first, then 翻页 / 每页 / 跳转 ───────────────────── */
+:is(.call-history,.call-reports,.interceptions-panel) .pager{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;padding:12px 12px 0;border-top:1px solid var(--line)}
+:is(.call-history,.call-reports,.interceptions-panel) .pager>[role=status]{order:-1;margin-right:auto;font-size:13px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+:is(.call-history,.call-reports,.interceptions-panel) .pager .passkey{min-height:44px;margin:0;padding:0 14px;border:0;border-radius:10px;background:var(--surface-2);color:var(--ink);font-size:13.5px;font-weight:600}
+:is(.call-history,.call-reports,.interceptions-panel) .pager .passkey:disabled{color:var(--ink-3);opacity:.7}
+:is(.call-history,.call-reports,.interceptions-panel) .pager label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-3)}
+:is(.call-history,.call-reports,.interceptions-panel) .pager select,:is(.call-history,.call-reports,.interceptions-panel) .pager input{min-height:44px;margin:0;padding:0 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-variant-numeric:tabular-nums}
+:is(.call-history,.call-reports,.interceptions-panel) .pager input{width:72px}
+:is(.call-history,.call-reports,.interceptions-panel) .pager form{display:flex;align-items:center;gap:6px;margin:0}
+
+/* Detail pane: the open/close toggles sit at the right of their section titles, not inside the source switch. */
+.call-detail-recording,.call-detail-transcript{position:relative}
+.call-detail-recording .call-recording>.passkey{position:absolute;top:16px;right:18px}
+.call-detail-transcript .report-transcript:first-of-type>.passkey{position:absolute;top:-4px;right:0}
+.call-detail-recording .call-recording .recording-sources{margin-top:0}
+.call-history .call-search input{max-width:none}
+.recording-pair-controls .recording-progress input[type=range]{min-height:0;padding:0;border:0;box-shadow:none;outline-offset:6px}
+.record.call-record .call-record-sim{max-width:100%;min-width:0;overflow-wrap:normal}
+.call-record-gateway{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.record.call-record .call-record-line{overflow-wrap:normal}
+@media (max-width:600px){.record.call-record .call-record-gateway{display:none}}
+.record.call-record>.call-owner,.record.call-record>.call-ai-status{margin:4px 0 0 52px!important}
+.record.call-record>.history-call-actions{flex-direction:row!important;flex-wrap:wrap}
+@media (max-width:600px){.record.call-record>.call-owner,.record.call-record>.call-ai-status{margin:4px 0 0 52px!important}.record.call-record>.history-call-actions,.record.call-record>.record-media-actions{margin-left:52px}}
+.transcript-line>strong.speaker-ai{color:var(--ai)}
+
+/* 电话 page recent list: chip in its own column, no gateway text, relative time. */
+.call-list-compact .record.call-record>.call-record-heading{grid-template-columns:40px minmax(0,1fr) minmax(0,max-content) auto}
+.call-list-compact .record.call-record .call-record-meta time{min-width:76px;text-align:right}
+.call-list-compact .record.call-record>.record-actions:not(.history-call-actions){margin-left:52px}
+@media (max-width:600px){
+  .call-list-compact .record.call-record>.call-record-heading{grid-template-columns:40px minmax(0,1fr) auto}
+  .call-list-compact .record.call-record>.call-record-heading>.call-record-sim{grid-column:2;grid-row:2}
+}
+.call-record-sim .sim-chip{max-width:min(100%,260px)}
+.call-detail-meta .call-record-sim .sim-chip{max-width:none}

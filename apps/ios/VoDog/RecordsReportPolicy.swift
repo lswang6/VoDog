@@ -10,9 +10,9 @@ enum RecordsTab: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .calls: "全部通话"
-        case .reports: "报告"
-        case .interceptions: "拦截记录"
+        case .calls: "通话"
+        case .reports: "转录报告"
+        case .interceptions: "拦截"
         }
     }
 }
@@ -154,6 +154,16 @@ enum ReportCardFacts {
 
 /// 通话时长 (S82 short format: "48 秒" / "2 分 05 秒"). A call that was never answered has no talk time at all,
 /// which is why the slot is dropped rather than printed as 0.
+/// S95b §C: what a transcript shows around its text. Provider, model and version ids, run / job ids and raw
+/// status enums never reach the screen.
+enum TranscriptDisplayPolicy {
+    static let unknownStatusTitle = "状态待确认"
+
+    static func captionLines(_ result: TranscriptResult) -> [String] {
+        ["机器转录供参考，可对照原始录音核实。"]
+    }
+}
+
 enum CallDurationLabel {
     static func text(answeredAt: String?, endedAt: String?) -> String? {
         guard let seconds = GatewayTimeDisplay.talkSeconds(answeredAt: answeredAt, endedAt: endedAt) else {

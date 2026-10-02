@@ -3371,7 +3371,9 @@ private fun Throwable.userMessageText(): String = when (this) {
         "CALL_IN_USE" -> "通话仍在进行或处理中，稍后再删"
         else -> message
     }
-    else -> message ?: javaClass.simpleName
+    // S95b §C: English exception text (`Unable to resolve host…`, class names) never reaches the user.
+    else -> message?.takeIf { Regex("\\p{IsHan}").containsMatchIn(it) }
+        ?: if (this is java.io.IOException) "网络连接失败，请稍后重试" else "操作失败，请稍后重试"
 }
 
 /**

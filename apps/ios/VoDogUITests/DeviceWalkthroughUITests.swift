@@ -42,7 +42,7 @@ final class DeviceWalkthroughUITests: XCTestCase {
         app.launch()
         guard app.tabBars.firstMatch.waitForExistence(timeout: 15) else { capture(app, "\(prefix)-00-not-signed-in"); return }
 
-        tab("通话", app); capture(app, "\(prefix)-10-calls")
+        tab("电话", app); capture(app, "\(prefix)-10-calls")
 
         tab("短信", app); capture(app, "\(prefix)-20-sms-list")
         app.swipeUp(); app.swipeUp(); sleep(2); capture(app, "\(prefix)-21-sms-list-scrolled")  // let momentum stop before the tap

@@ -81,6 +81,7 @@ export function ContactCard({
   media,
   onChanged,
   onMissing,
+  inline = false,
 }: {
   target: ContactCardTarget;
   contact?: ContactDto | null;
@@ -98,6 +99,8 @@ export function ContactCard({
   media?: React.ReactNode;
   /** Reports the new blocked state so the opener can keep the card truthful while the lists reload. */
   onChanged?: (update?: {blocked: boolean; blockedEntryId?: string | null}) => void;
+  /** Wide 通讯录: render as the right-hand detail pane instead of a modal dialog (no backdrop, no focus trap). */
+  inline?: boolean;
   onMissing?: (message: string) => void;
 }) {
   const [contact, setContact] = useState<ContactDto | null>(preloaded);
@@ -366,15 +369,15 @@ export function ContactCard({
 
   return (
     <div
-      className="modal-backdrop"
+      className={inline ? 'contact-card-pane' : 'modal-backdrop'}
       onPointerDown={event => {
-        if (event.target === event.currentTarget) onClose();
+        if (!inline && event.target === event.currentTarget) onClose();
       }}
     >
       <div
-        className="contact-card"
-        role="dialog"
-        aria-modal="true"
+        className={inline ? 'contact-card contact-card-inline' : 'contact-card'}
+        role={inline ? 'region' : 'dialog'}
+        aria-modal={inline ? undefined : 'true'}
         aria-label={`联系人卡片 ${title}`}
         ref={panel}
         tabIndex={-1}
@@ -382,7 +385,7 @@ export function ContactCard({
           if (event.key === 'Escape') {
             event.stopPropagation();
             onClose();
-          } else if (event.key === 'Tab') {
+          } else if (event.key === 'Tab' && !inline) {
             const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
               .filter(element => element.offsetParent !== null);
             if (!focusable.length) {
@@ -536,6 +539,22 @@ export function ContactCard({
                 添加到现有联系人
               </button>
             )}
+            {onEdit && contact && (
+              <button type="button" className="passkey" disabled={busy} onClick={() => onEdit(contact)}>
+                编辑
+              </button>
+            )}
+          </div>
+        )}
+
+        {media && (
+          <div className="contact-card-links" role="group" aria-label="录音与转录">
+            {media}
+          </div>
+        )}
+
+        {!attaching && !confirming && (
+          <div className="contact-card-danger" role="group" aria-label="屏蔽与删除">
             {actions.canUnblock ? (
               <button type="button" className="passkey hangup" disabled={busy} onClick={() => setConfirming('unblock')}>
                 解除屏蔽
@@ -551,21 +570,10 @@ export function ContactCard({
               </button>
             )}
             {onEdit && contact && (
-              <button type="button" className="passkey" disabled={busy} onClick={() => onEdit(contact)}>
-                编辑
-              </button>
-            )}
-            {onEdit && contact && (
               <button type="button" className="passkey hangup" disabled={busy} onClick={() => setConfirming('delete')}>
                 删除
               </button>
             )}
-          </div>
-        )}
-
-        {media && (
-          <div className="contact-card-links" role="group" aria-label="录音与转录">
-            {media}
           </div>
         )}
       </div>

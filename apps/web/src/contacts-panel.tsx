@@ -56,12 +56,15 @@ export function ContactsPanel({
   onEditConsumed,
   onOpenNumber,
   onChanged,
+  selectedId = null,
 }: {
   busy: boolean;
   run: (action: () => Promise<void>) => Promise<boolean>;
   request: ApiRequest;
   createFor?: {remoteNumber: string; token: number} | null;
   editFor?: {contact: ContactDto; token: number} | null;
+  /** Contact shown in the detail pane (wide layout); its row is marked current. */
+  selectedId?: string | null;
   /** Bumped by the opener after a card blocked, unblocked or deleted a number, so the 已屏蔽 badge stays current. */
   reloadToken?: number;
   onCreateConsumed?: () => void;
@@ -274,7 +277,7 @@ export function ContactsPanel({
   const editing = mode.kind !== 'list';
 
   return (
-    <section className="panel contacts-panel">
+    <section className={`panel contacts-panel${editing ? ' is-editing' : ''}`}>
       <div className="panel-heading">
         <div>
           <h2>通讯录</h2>
@@ -540,48 +543,39 @@ export function ContactsPanel({
           ) : !items.length ? (
             <p className="muted">{search.trim() ? '没有匹配的联系人' : '还没有联系人，先导入 .vcf 文件或新建一个。'}</p>
           ) : (
-            <div className="contact-grid">
+            <div className="contact-grid contact-list">
               {items.map(contact => {
                 const phone = contactPrimaryPhone(contact);
                 const email = (contact.emails || [])[0] || null;
                 const primary = phone?.e164 || phone?.rawNumber || '';
-                const more =
-                  (contact.phones?.length ?? 0) > 1 ||
-                  (contact.emails?.length ?? 0) > 1 ||
-                  Boolean(contact.organization || contact.notes || (contact.addresses?.length ?? 0));
                 const initial = (contact.displayName || '?').trim().charAt(0).toUpperCase() || '?';
+                const current = selectedId === contact.id;
                 return (
                   <button
                     type="button"
-                    className="contact-tile"
+                    className={`contact-tile contact-row${current ? ' selected' : ''}`}
                     key={contact.id}
                     disabled={busy}
+                    aria-current={current ? 'true' : undefined}
                     aria-label={`查看联系人 ${contact.displayName}`}
+                    title={contact.displayName}
                     onClick={() => onOpenNumber?.(primary, contact)}
                   >
-                    <span className="contact-tile-head">
-                      <span className="contact-avatar" aria-hidden="true">{initial}</span>
-                      <span className="contact-tile-title">
-                        <strong>{contact.displayName}</strong>
-                        {contact.blocked && <span className="blocked-badge">已屏蔽</span>}
-                      </span>
-                      {more && <span className="more-badge">更多</span>}
-                    </span>
-                    <span className="contact-tile-facts">
-                      {phone ? (
-                        <span className="contact-tile-fact" dir="ltr">
-                          <small>{phoneLabelText(phone.label)}{' '}</small>
-                          <span>{phone.rawNumber}</span>
-                        </span>
-                      ) : null}
-                      {email ? (
-                        <span className="contact-tile-fact">
-                          <small>{emailLabelText(email.label)}{' '}</small>
+                    <span className="contact-avatar" aria-hidden="true">{initial}</span>
+                    <span className="contact-row-main">
+                      <strong className="contact-row-name">{contact.displayName}</strong>
+                      <span className="contact-row-sub">
+                        {contact.organization && <span className="contact-row-org">{contact.organization}</span>}
+                        {phone ? (
+                          <span dir="ltr">{phoneLabelText(phone.label)} <span className="num">{phone.rawNumber}</span></span>
+                        ) : email ? (
                           <span>{email.address}</span>
-                        </span>
-                      ) : null}
-                      {!phone && !email && <span className="muted contact-tile-fact">无号码</span>}
+                        ) : (
+                          <span className="muted">无号码</span>
+                        )}
+                      </span>
                     </span>
+                    {contact.blocked && <span className="blocked-badge">已屏蔽</span>}
                   </button>
                 );
               })}

@@ -26,6 +26,7 @@ struct VoDogMessagesView: View {
     @State private var selectedMessageIDs: Set<String> = []
     @State private var confirmingSelectionDelete = false
     @State private var deletingSelection = false
+    @State private var searchText = ""
 
     private struct SMSList: Decodable { var items: [VoDogSMSMessage] }
 
@@ -42,22 +43,29 @@ struct VoDogMessagesView: View {
 
     private var thread: VoDogConversation? { threads.first { $0.id == selectedThread } }
 
+    /// Client-side filter over the loaded threads only: number, contact name, message bodies.
+    private var visibleThreads: [VoDogConversation] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return threads }
+        return threads.filter { thread in
+            thread.displayNumber.localizedCaseInsensitiveContains(query)
+                || (thread.contactName?.localizedCaseInsensitiveContains(query) ?? false)
+                || thread.messages.contains { $0.body?.localizedCaseInsensitiveContains(query) ?? false }
+        }
+    }
+
     /// S67: incoming ids of the open conversation; re-sent when a new one arrives while it is open.
     private var openIncomingIDs: [String] {
         composing ? [] : thread?.messages.filter { $0.direction == "incoming" }.map(\.id) ?? []
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            VoDogSIMStrip(account: account, selection: selection, badgeKind: .sms)
-            Divider()
-            ResizableCommunicationSplit(sidebarWidth: $sidebarWidth) {
-                sidebar.communicationSidebarColumnStyle()
-            } detail: {
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .communicationDetailColumnStyle()
-            }
+        ResizableCommunicationSplit(sidebarWidth: $sidebarWidth) {
+            sidebar.communicationSidebarColumnStyle()
+        } detail: {
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .communicationDetailColumnStyle()
         }
         .task {
             // ponytail: 5 s poll of the latest 100 while the page is on screen; no push on macOS.
@@ -77,32 +85,47 @@ struct VoDogMessagesView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(L10n.tr("短信")).font(.title2.bold())
-                Spacer()
-                CommunicationIconActionButton(systemImage: "square.and.pencil", accessibilityLabel: L10n.tr("新短信")) {
+            HStack(spacing: 8) {
+                Text(L10n.tr("短信")).font(.headline)
+                Spacer(minLength: 6)
+                VoDogSIMMenu(account: account, selection: selection)
+                Button {
                     composing = true
                     selectedThread = nil
+                } label: {
+                    Image(systemName: "square.and.pencil").frame(width: 28, height: 28)
                 }
+                .buttonStyle(.borderless)
+                .help(L10n.tr("新短信"))
+                .accessibilityLabel(L10n.tr("新短信"))
                 .disabled(selection.wrappedValue == nil)
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
-            Divider()
+            .signalToolbar()
+            TextField(L10n.tr("搜索联系人、号码或短信"), text: $searchText)
+                .communicationSearchField()
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
             List {
                 if !loaded {
                     ProgressView().frame(maxWidth: .infinity)
                 } else if threads.isEmpty {
                     Text(L10n.tr("这个号码还没有短信")).foregroundStyle(.secondary)
+                } else if visibleThreads.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
                 }
-                ForEach(threads) { thread in
+                ForEach(visibleThreads) { thread in
                     let selected = selectedThread == thread.id
                     VoDogBadgeReader(store: account.badges) { badges in
                         let unread = thread.hasUnread(excluding: badges.readSMS)
                         // A Button so a cua-driver AX press opens the conversation exactly like a click.
                         Button { open(thread) } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                                VoDogUnreadDot(visible: unread)
+                            HStack(alignment: .center, spacing: 10) {
+                                MessageConversationAvatar(title: thread.contactName ?? thread.displayNumber,
+                                                          address: thread.displayNumber, size: 36)
+                                    .overlay(alignment: .topLeading) {
+                                        VoDogUnreadDot(visible: unread).offset(x: -3, y: -1)
+                                    }
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(alignment: .firstTextBaseline) {
                                         Text(thread.contactName ?? thread.displayNumber)
@@ -112,10 +135,10 @@ struct VoDogMessagesView: View {
                                             Text(CommunicationUI.listTimestamp(date)).font(.caption).foregroundStyle(.secondary)
                                         }
                                     }
-                                    Text(thread.latest?.body ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    Text(thread.latest?.body ?? "").font(.callout).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 6)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                             .communicationSelectionHighlight(selected)
@@ -132,10 +155,13 @@ struct VoDogMessagesView: View {
                         }
                     }
                     .disabled(threadBusyID == thread.id)
+                    .listRowInsets(CommunicationUI.listRowInsets)
+                    .listRowSeparator(.hidden)
                 }
                 if let actionMessage { VoDogErrorLine(text: actionMessage) }
                 if let loadError { VoDogErrorLine(text: loadError) }
             }
+            .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .confirmationDialog(L10n.tr("删除这段对话？"),
                                 isPresented: Binding(get: { pendingThreadDelete != nil },
@@ -181,9 +207,15 @@ struct VoDogMessagesView: View {
             let chosen = VoDogSMSDeletePolicy.orderedIDs(selectedMessageIDs, in: thread.messages)
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(thread.contactName.map { "\($0) · \(thread.displayNumber)" } ?? thread.displayNumber)
-                        .font(.headline)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(thread.contactName ?? thread.displayNumber)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(verbatim: sourceLine(thread))
+                            .font(.caption)
+                            .foregroundStyle(Signal.ink3)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 8)
                     if selecting {
                         Text(L10n.tr("已选 %lld 条", Int64(chosen.count))).font(.callout).foregroundStyle(.secondary)
@@ -193,12 +225,33 @@ struct VoDogMessagesView: View {
                             selectedMessageIDs = []
                         }
                     } else {
-                        Button(L10n.tr("选择")) { selecting = true }
-                            .disabled(thread.messages.isEmpty)
+                        if VoDogContactsLogic.canBlock(thread.blockNumber) {
+                            Button { pendingThreadBlockDelete = thread } label: {
+                                Image(systemName: "nosign").frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.borderless)
+                            .help(L10n.tr("删除并屏蔽"))
+                            .accessibilityLabel(L10n.tr("删除并屏蔽"))
+                        }
+                        Menu {
+                            Button(L10n.tr("选择")) { selecting = true }
+                                .disabled(thread.messages.isEmpty)
+                            Divider()
+                            Button(L10n.tr("删除会话"), role: .destructive) { pendingThreadDelete = thread }
+                                .accessibilityLabel(L10n.tr("删除会话"))
+                        } label: {
+                            Image(systemName: "ellipsis")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help(L10n.tr("更多"))
+                        .accessibilityLabel(L10n.tr("更多"))
                     }
                 }
-                .padding(12)
-                Divider()
+                .disabled(threadBusyID == thread.id)
+                .padding(.horizontal, 6)
+                .signalToolbar()
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 8) {
@@ -232,7 +285,7 @@ struct VoDogMessagesView: View {
                         Text(L10n.tr("选中的短信会被彻底删除，无法恢复。"))
                     }
                 } else if thread.canReply, thread.replyNumber != nil {
-                    composer.padding(12)
+                    composer.padding(.horizontal, 16).padding(.vertical, 12)
                 } else {
                     Text(L10n.tr("这个发件人不能回复")).font(.caption).foregroundStyle(.secondary).padding(12)
                 }
@@ -247,14 +300,26 @@ struct VoDogMessagesView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(L10n.tr("短信内容"), text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .lineLimit(1...6)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(Signal.line, lineWidth: 1)
+                    }
                 Button {
                     Task { await send() }
                 } label: {
-                    if sending { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.up.circle.fill") }
+                    Group {
+                        if sending { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.up") }
+                    }
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Signal.onBrand)
+                    .frame(width: 34, height: 34)
+                    .background(Signal.brand, in: Circle())
+                    .opacity(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.45 : 1)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
                 .disabled(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel(L10n.tr("发送"))
             }
@@ -285,11 +350,10 @@ struct VoDogMessagesView: View {
         return VStack(alignment: outgoing ? .trailing : .leading, spacing: 3) {
             Text(message.body ?? "")
                 .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .foregroundStyle(outgoing ? Color.white : Color.primary)
-                .background(outgoing ? Color.accentColor : Color.secondary.opacity(0.15),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .signalBubble(outgoing: outgoing)
+            if !outgoing, !selecting, let code = SMSVerificationCodeExtractor.extract(from: message.body ?? "") {
+                CopyCodeButton(code: code)
+            }
             // iOS bubble captions: direction · SIM · delivery, then the absolute time.
             Text([outgoing ? L10n.tr("发出") : L10n.tr("收到"),
                   account.sims.first { $0.id == message.simId }?.displayName,
@@ -303,6 +367,13 @@ struct VoDogMessagesView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: outgoing ? .trailing : .leading)
+    }
+
+    /// 「号码 · 通过 <SIM> 接收」 (number only when a contact name is the title).
+    private func sourceLine(_ thread: VoDogConversation) -> String {
+        let sim = account.sims.first { $0.id == thread.latest?.simId }?.displayName
+        return [thread.contactName != nil ? thread.displayNumber : nil, sim.map { L10n.tr("通过 %@ 接收", $0) }]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     private func openPendingRecipient() {

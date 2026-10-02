@@ -12,7 +12,7 @@ export function playbackPairs(recording:RecordingDescriptor,source:RecordingSour
  if(!usable(remote))return pairs;
  if(source==='pixel'&&usable(uplink))pairs.push({tracks:[remote,uplink],label:'通话双方（含本机接入）',description:'同时播放对方原声与本机上行声音，含机主在本机接入后说的话，可能存在时间偏差。'});
  if(usable(caller))pairs.push({tracks:[remote,caller],label:'双向原声一起播放',description:'同时播放双方原声，可能存在时间偏差。需要核对细节时，可展开原始分轨。'});
- if(source==='pixel'&&usable(playout))pairs.push({tracks:[remote,playout],label:'补偿后双向播放',description:'同时播放对方原声与独立补偿播放轨；PLC/FEC 声音不会改变原声完整性。'});
+ if(source==='pixel'&&usable(playout))pairs.push({tracks:[remote,playout],label:'补偿后双向播放',description:'同时播放对方原声与补偿后的播放声；补偿只用于播放，不改变原声。'});
  return pairs;
 }
 

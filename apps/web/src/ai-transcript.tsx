@@ -1,6 +1,12 @@
 import React, {useEffect, useState} from 'react';
 import type {ApiRequest} from './contacts';
 
+/** `00:07` from the start of the recording / first turn (S95 transcript timestamps). */
+export function clockOffset(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 /**
  * “AI 对话” block on a record row (S21 §E/§F).
  *
@@ -12,6 +18,12 @@ export type AiTranscriptLine = {role?: string; text?: string; at?: string};
 
 export function aiTranscriptRoleLabel(role: string | null | undefined): string {
   return role === 'ai' ? 'AI 助理' : role === 'caller' ? '对方' : '通话';
+}
+
+/** `00:07` since the first turn; blank when the turn carries no time. */
+function turnOffset(first: string | undefined, at: string | undefined): string {
+  const start = Date.parse(first || ''), value = Date.parse(at || '');
+  return Number.isFinite(start) && Number.isFinite(value) ? clockOffset(value - start) : '';
 }
 
 export function AiTranscript({
@@ -48,9 +60,9 @@ export function AiTranscript({
           key={index}
           className={'ai-turn ai-turn-' + (item.role === 'ai' ? 'ai' : item.role === 'caller' ? 'caller' : 'other')}
         >
+          <span className="ai-turn-time num">{turnOffset(items[0]?.at, item.at)}</span>
           <strong>{aiTranscriptRoleLabel(item.role)}</strong>
-          <br />
-          {item.text}
+          <span className="ai-turn-text">{item.text}</span>
         </p>
       ))}
       <p className="note">这是 AI 接听时的实时对话记录。</p>

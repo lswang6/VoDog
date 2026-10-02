@@ -53,27 +53,63 @@ class ClientThemeTest {
     }
 
     /**
-     * S22 (R4 Part B must-fix): `error` is iOS `callerDanger` verbatim, and it changes with the
-     * appearance. A single fixed red matched neither theme and drifted from the iOS app.
+     * S95: `error` is the Signal `danger` token per appearance (was iOS `callerDanger` since S22);
+     * filled destructive buttons use `dangerFill`, the same deep red in both themes.
      */
     @Test
-    fun errorMatchesTheIosCallerDangerValuePerAppearance() {
-        assertEquals(0xFFD70015.toInt(), clientColorScheme(false).error.toArgb())
-        assertEquals(0xFFFF453A.toInt(), clientColorScheme(true).error.toArgb())
+    fun errorMatchesTheSignalDangerTokenPerAppearance() {
+        assertEquals(0xFFC2302B.toInt(), clientColorScheme(false).error.toArgb())
+        assertEquals(0xFFFF7A73.toInt(), clientColorScheme(true).error.toArgb())
+        assertEquals(0xFFD33A35.toInt(), FilledDestructiveRed.toArgb())
+        assertTrue(contrastRatio(FilledDestructiveRed, Color.White) >= 4.5)
     }
 
-    /** `error` must read as red, not pink: a dominant red channel with muted green and blue. */
+    /**
+     * `error` must read as red, not pink or orange: a strong red channel with green and blue each at
+     * most half of it. (Signal's dark danger is a light salmon, so the old fixed 0x60 cap no longer
+     * applies there; the filled red is held to the strict cap.)
+     */
     @Test
     fun errorIsRedDominantInBothSchemes() {
-        listOf(false, true).forEach { dark ->
-            val error = clientColorScheme(dark).error
+        (listOf(false, true).map { clientColorScheme(it).error } + FilledDestructiveRed).forEach { error ->
             val red = channel(error.red)
             val green = channel(error.green)
             val blue = channel(error.blue)
-            assertTrue("dark=$dark red=$red", red >= 0xC0)
-            assertTrue("dark=$dark green=$green", green <= 0x60)
-            assertTrue("dark=$dark blue=$blue", blue <= 0x60)
+            assertTrue("red=$red", red >= 0xC0)
+            assertTrue("green=$green", green * 2 <= red)
+            assertTrue("blue=$blue", blue * 2 <= red)
         }
+        assertTrue(channel(FilledDestructiveRed.green) <= 0x60 && channel(FilledDestructiveRed.blue) <= 0x60)
+    }
+
+    /** Signal call / ai text colors must also read on their own surface and soft fills. */
+    @Test
+    fun signalAccentTextStaysReadable() {
+        listOf(SignalLight, SignalDark).forEach { c ->
+            listOf(c.call to c.surface, c.ai to c.surface, c.ai to c.aiSoft,
+                c.warn to c.warnSoft, c.brand to c.brandSoft, c.ink3 to c.surface, c.danger to c.surface).forEach { (fg, bg) ->
+                assertTrue("${fg.toArgb().toUInt().toString(16)} on ${bg.toArgb().toUInt().toString(16)}", contrastRatio(fg, bg) >= 4.5)
+            }
+        }
+    }
+
+    /**
+     * Token pairs that only carry a large/bold button label plus an icon (「拨打」 on callFill, 「回拨」
+     * on callSoft): WCAG large-text 3:1. Light mode sits at ~4.2–4.4:1 — a token-level gap, noted in S95.
+     */
+    @Test
+    fun callButtonsMeetLargeTextContrast() {
+        listOf(SignalLight, SignalDark).forEach { c ->
+            assertTrue(contrastRatio(c.callFill, Color.White) >= 3.0)
+            assertTrue(contrastRatio(c.call, c.callSoft) >= 3.0)
+        }
+    }
+
+    @Test
+    fun lightSchemeHasNoPureWhitePage() {
+        val scheme = clientColorScheme(false)
+        assertEquals(0xFFEEEFF3.toInt(), scheme.background.toArgb())
+        assertEquals(0xFFFBFBFD.toInt(), scheme.surface.toArgb())
     }
 
     /** Warning amber is only legible if it also clears 4.5:1 on the scheme it belongs to. */

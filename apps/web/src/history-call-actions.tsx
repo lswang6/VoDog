@@ -18,6 +18,9 @@ export function HistoryCallActions({
   onSms,
   onBlock,
   onDelete,
+  onContact,
+  contactLabel = '存为联系人',
+  variant,
 }: {
   remoteNumber?: string;
   simId?: string;
@@ -30,11 +33,16 @@ export function HistoryCallActions({
   onBlock: () => Promise<void> | void;
   /** S30: absent on surfaces that only read records, so the fourth button simply does not render there. */
   onDelete?: () => Promise<void> | void;
+  /** S95 记录详情：存为联系人 / 联系人信息 opens the existing contact card. */
+  onContact?: () => void;
+  contactLabel?: string;
+  /** `detail`: 回拨 becomes the solid green primary of the 记录 detail pane. */
+  variant?: 'detail';
 }) {
   const [confirming, setConfirming] = useState<'block' | 'delete' | null>(null);
   const pending = confirming === 'block' ? onBlock : onDelete;
   return (
-    <div className="record-actions history-call-actions">
+    <div className={'record-actions history-call-actions' + (variant ? ` history-call-actions-${variant}` : '')}>
       {confirming ? (
         <ConfirmAction
           busy={busy}
@@ -49,7 +57,7 @@ export function HistoryCallActions({
         <>
           <button
             type="button"
-            className="passkey"
+            className={variant === 'detail' ? 'passkey call-primary' : 'passkey'}
             disabled={busy || !canRedial(remoteNumber, simId, mediaLive)}
             onClick={onRedial}
           >
@@ -63,6 +71,11 @@ export function HistoryCallActions({
           >
             {HISTORY_ACTION_COPY.sms}
           </button>
+          {onContact && (
+            <button type="button" className="passkey" disabled={busy} onClick={onContact}>
+              {contactLabel}
+            </button>
+          )}
           {blocked && !onDelete ? <span className="pill pill-blocked">{HISTORY_ACTION_COPY.blocked}</span> : <MoreActions label="更多通话操作">
           {!blocked && (
           <button

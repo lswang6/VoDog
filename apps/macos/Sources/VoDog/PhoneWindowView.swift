@@ -34,11 +34,11 @@ struct PhoneWindowView: View {
     @ObservedObject var model: PhoneWindowModel
     @ObservedObject var messagesModel: MessagesWindowModel
     @ObservedObject var contacts: SystemContactStore
-    @AppStorage("CommunicationSidebarWidth.v1") private var storedSidebarWidth = Double(CommunicationUI.sidebarWidth)
+    @AppStorage("CommunicationSidebarWidth.v2") private var storedSidebarWidth = Double(CommunicationUI.sidebarWidth)
 
     var body: some View {
         HStack(spacing: 0) {
-            CommunicationRailView(model: model)
+            CommunicationNavigationSidebar(model: model, account: appState.voDog)
 
             Group {
                 if appState.call.hasCall && model.prefersFullCallPresentation {
@@ -54,7 +54,7 @@ struct PhoneWindowView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay { VoDogCallLayer(account: appState.voDog) }  // S57 remote ring / call
         }
-        .background(Color.clear)
+        .background(Signal.bg)
         .ignoresSafeArea(.container, edges: .top)
         .onAppear {
             if contacts.authorizationState == .notDetermined {
@@ -119,7 +119,6 @@ struct PhoneWindowView: View {
                     )
                         .environmentObject(appState)
                         .communicationSidebarColumnStyle()
-                        .communicationModuleFloatingSidebar()
                 } detail: {
                     RecentCallDetailView(
                         model: model,
@@ -213,41 +212,34 @@ struct CommunicationModuleStatusMenu: View {
         Button {
             isPopoverPresented.toggle()
         } label: {
-            HStack(spacing: 8) {
-                CommunicationModuleSignalBars(
-                    bars: selectedModule?.modem.signalBars ?? 0,
-                    hasSignal: selectedModuleHasSignal,
-                    tint: selectedModuleHasSignal ? .green : .secondary,
-                    barWidth: 2.5,
-                    spacing: 1.5
-                )
-                .frame(width: 14, height: 18)
-                .accessibilityHidden(true)
-
-                Text(pickerTitle)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    LineBlock(color: appState.lineColor(for: selectedModule?.id))
+                    Text(verbatim: cardTitle)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    AiBadge(settings: aiSettings)
+                    Spacer(minLength: 4)
+                    LineStatusShape(status: selectedModule?.modem.isConnected == true ? .online : .offline)
+                }
+                HStack(spacing: 6) {
+                    Text(verbatim: cardDetail)
+                        .font(.caption)
+                        .foregroundStyle(Signal.ink3)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    SignalBars(bars: selectedModuleHasSignal ? (selectedModule?.modem.signalBars ?? 0) : 0,
+                               tint: Signal.ink2)
+                }
             }
-            .font(.callout)
-            .padding(.horizontal, 12)
-            .frame(width: 210, height: 36)
-            .contentShape(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-            )
+            .foregroundStyle(Signal.ink)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Signal.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
-        .adaptiveGlassSurface(
-            cornerRadius: 15,
-            treatment: .regular,
-            isInteractive: true
-        )
         .popover(
             isPresented: $isPopoverPresented,
             attachmentAnchor: .rect(.bounds),
@@ -256,7 +248,8 @@ struct CommunicationModuleStatusMenu: View {
             popoverContent
         }
         .help(statusDescription)
-        .accessibilityLabel(L10n.tr("蜂窝设备：%@", statusDescription))
+        .accessibilityLabel(L10n.tr("蜂窝设备：%@", [statusDescription, AiBadge.accessibilityText(aiSettings)]
+            .compactMap { $0 }.joined(separator: ", ")))
         .accessibilityValue(isPopoverPresented ? L10n.tr("已展开") : L10n.tr("已收起"))
         .accessibilityHint(L10n.tr("显示并选择当前通信模组"))
     }
@@ -377,6 +370,21 @@ struct CommunicationModuleStatusMenu: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    private var aiSettings: VoDogSIMSettings? { appState.accountSIM(for: selectedModule?.id)?.settings }
+
+    /// 「线路名 · 模组名」, or just the module name when no line is bound.
+    private var cardTitle: String {
+        guard let module = selectedModule else { return pickerTitle }
+        return [appState.lineName(for: module.id), module.localizedDisplayName]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var cardDetail: String {
+        guard let module = selectedModule else { return L10n.tr("连接设备后将自动显示在这里") }
+        guard module.modem.isConnected else { return module.statusText }
+        return [module.carrierName, module.technologyName].compactMap { $0 }.joined(separator: " · ")
+    }
+
     private var pickerTitle: String {
         appState.currentCommunicationModule?.selectorTitle ??
             (appState.cellularModules.isEmpty ? L10n.tr("没有可用模组") : L10n.tr("选择通信模组"))
@@ -491,71 +499,138 @@ private struct CommunicationModulePopoverAction: View {
     }
 }
 
-private struct CommunicationRailView: View {
+/// Text sidebar (spec 01 §6 macOS): 通信 / 设备 / 账号 groups, module status card, 设置.
+/// Presentation only — selection still routes through `PhoneWindowModel.activateFromRail`.
+private struct CommunicationNavigationSidebar: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject var model: PhoneWindowModel
-    @Namespace private var selectionNamespace
+    @ObservedObject var account: VoDogAccount
 
     var body: some View {
-        VStack(spacing: 12) {
-            railButton(.messages, icon: .messages)
-            railButton(.recents, icon: .recents)
-            railButton(.recordings, icon: .recordings)
-            railButton(.proxy, icon: .proxy)
-            Spacer()
-            railButton(.voDog, icon: .voDog)
-            railButton(.sim, icon: .sim)
-            railButton(.settings, icon: .settings)
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    group(L10n.tr("通信"), first: true)
+                    row(.messages, title: L10n.tr("短信"), systemImage: "message")
+                    row(.recents, title: L10n.tr("电话"), systemImage: "phone")
+                    row(.recordings, title: L10n.tr("录音"), systemImage: "waveform")
+                    row(.contacts, title: L10n.tr("通讯录"), systemImage: "person")
+                    group(L10n.tr("设备"))
+                    row(.sim, title: L10n.tr("SIM 与 eSIM"), systemImage: "simcard")
+                    row(.proxy, title: L10n.tr("网络与代理"), systemImage: "globe")
+                    group(L10n.tr("账号"))
+                    row(.voDog, title: PhoneWindowSection.voDog.title, systemImage: "cloud") {
+                        HStack(spacing: 4) {
+                            LineStatusShape(status: account.user == nil ? .offline : .online, size: 6)
+                            Text(account.user == nil ? L10n.tr("未登录") : L10n.tr("已同步"))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Signal.ink3)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+            }
+            .scrollIndicators(.never)
+
+            VStack(alignment: .leading, spacing: 8) {
+                CommunicationModuleStatusMenu {
+                    model.activateFromRail(.sim)
+                }
+                row(.settings, title: L10n.tr("设置"), systemImage: "slider.horizontal.3", iconTint: Signal.ink2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 12)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 46)
-        .padding(.bottom, 18)
-        .frame(width: CommunicationUI.railWidth)
+        .padding(.top, 38)  // clear the traffic lights (full-size content view)
+        .frame(width: CommunicationUI.navigationWidth)
         .frame(maxHeight: .infinity)
-        .communicationSidebarMaterial()
+        .background(Signal.chrome.ignoresSafeArea(edges: .vertical))
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Signal.line).frame(width: 1).ignoresSafeArea(edges: .vertical)
+        }
     }
 
-    private func railButton(
+    /// The highlighted row: dialer is reached from 电话.
+    private var highlighted: PhoneWindowSection {
+        model.selection == .dialer ? .recents : model.selection
+    }
+
+    private func group(_ title: String, first: Bool = false) -> some View {
+        Text(verbatim: title)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Signal.ink3)
+            .padding(.horizontal, 10)
+            .padding(.top, first ? 0 : 12)
+            .padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func row(
         _ section: PhoneWindowSection,
-        icon: CommunicationRailIconKind
+        title: String,
+        systemImage: String,
+        iconTint: Color = Signal.brand,
+        @ViewBuilder trailing: () -> some View = { EmptyView() }
     ) -> some View {
-        let isSelected = normalizedSelection == section
-        return AnimatedCommunicationRailButton(
-            section: section,
-            icon: icon,
-            isSelected: isSelected,
-            selectionNamespace: selectionNamespace,
-            selectionGroup: selectionGroup(for: section)
-        ) {
-            withAnimation(.smooth(duration: 0.28)) {
-                model.activateFromRail(section)
+        let isSelected = highlighted == section
+        return Button {
+            guard section != model.selection else { return }
+            withAnimation(.smooth(duration: 0.2)) { model.activateFromRail(section) }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(iconTint)
+                    .frame(width: 18)
+                Text(verbatim: title)
+                    .foregroundStyle(Signal.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                trailing()
+                countBadge(section)
             }
+            .font(.body)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+            .background(isSelected ? Signal.surface3 : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
-        .overlay(alignment: .topTrailing) {
-            // S67: signed-in VoDog unread counts.
-            switch section {
-            case .messages: VoDogRailBadge(account: appState.voDog, kind: .sms).offset(x: 2, y: -2)
-            case .recents: VoDogRailBadge(account: appState.voDog, kind: .calls).offset(x: 2, y: -2)
-            default: EmptyView()
-            }
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func selectionGroup(for section: PhoneWindowSection) -> String {
+    /// Signed in: the account's S67 unread counts; signed out: this Mac's unread SMS (plain ink3 count).
+    @ViewBuilder
+    private func countBadge(_ section: PhoneWindowSection) -> some View {
         switch section {
-        case .messages, .recents, .recordings, .proxy:
-            return "primary"
-        case .sim, .settings, .voDog:
-            return "secondary"
-        case .dialer, .contacts:
-            return "primary"
+        case .messages:
+            if account.user != nil {
+                VoDogBadgeReader(store: account.badges) { store in
+                    plainCount(store.counts.count(.sms, simID: nil))
+                }
+            } else {
+                plainCount(appState.unreadCount)
+            }
+        case .recents:
+            if account.user != nil {
+                VoDogBadgeReader(store: account.badges) { store in
+                    plainCount(store.counts.count(.calls, simID: nil))
+                }
+            }
+        default:
+            EmptyView()
         }
     }
 
-    private var normalizedSelection: PhoneWindowSection {
-        switch model.selection {
-        case .dialer, .contacts: return .recents
-        default: return model.selection
+    @ViewBuilder
+    private func plainCount(_ count: Int) -> some View {
+        if let text = VoDogBadges.text(count) {
+            Text(verbatim: text)
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(Signal.ink3)
+                .accessibilityLabel(L10n.tr("%lld 条未读", Int64(count)))
         }
     }
 }
@@ -1141,10 +1216,10 @@ private struct RecentCallsView: View {
                         ForEach(filteredRecords) { record in
                         HStack(spacing: 12) {
                             ZStack {
-                                Circle()
-                                    .fill(iconTint(record).opacity(0.12))
+                                Color.clear
+                                    .selectionBackground(iconTint(record), opacity: 0.12, in: Circle())
                                 Image(systemName: iconName(record))
-                                    .foregroundStyle(iconTint(record))
+                                    .selectionTint(iconTint(record))
                             }
                             .frame(width: 38, height: 38)
                             .accessibilityHidden(true)
@@ -1165,7 +1240,7 @@ private struct RecentCallsView: View {
                                     }
                                 }
                                 .font(.caption)
-                                .foregroundStyle(record.isMissed ? Color.red : Color.secondary)
+                                .selectionTint(record.isMissed ? AnyShapeStyle(Signal.danger) : AnyShapeStyle(.secondary))
                             }
 
                             Spacer()
@@ -1749,16 +1824,16 @@ private struct RecordingsManagementView: View {
         List(filteredRecordingRecords) { record in
             HStack(spacing: 11) {
                 ZStack {
-                    Circle()
-                        .fill(recordings.playingRecordingID == record.id
-                            ? Color.accentColor.opacity(0.14)
-                            : Color.secondary.opacity(0.10))
+                    Color.clear
+                        .selectionBackground(recordings.playingRecordingID == record.id ? Signal.brand : Signal.ink3,
+                                             opacity: recordings.playingRecordingID == record.id ? 0.14 : 0.10,
+                                             in: Circle())
                     Image(systemName: recordings.playingRecordingID == record.id
                         ? "waveform.circle.fill"
                         : "waveform")
-                        .foregroundStyle(recordings.playingRecordingID == record.id
-                            ? Color.accentColor
-                            : Color.secondary)
+                        .selectionTint(recordings.playingRecordingID == record.id
+                            ? AnyShapeStyle(Signal.brand)
+                            : AnyShapeStyle(.secondary))
                 }
                 .frame(width: 38, height: 38)
 
@@ -1772,7 +1847,7 @@ private struct RecordingsManagementView: View {
                         Text(recordingDuration(record.duration))
                         if record.isIncomplete {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
+                                .selectionTint(Signal.warn)
                                 .help(L10n.tr("录音过程中部分音频未能写入"))
                         }
                     }

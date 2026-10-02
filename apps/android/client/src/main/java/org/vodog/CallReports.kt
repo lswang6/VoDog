@@ -509,7 +509,10 @@ internal fun callLineLabel(sim: JSONObject?): String? {
     val number = sim.nullableString("phoneLabel")?.takeIf(String::isNotBlank)
         ?: sim.nullableString("label")?.takeIf(String::isNotBlank)
         ?: "未命名号码"
-    val gateway = sim.nullableString("gatewayId")?.takeIf(String::isNotBlank)?.let { sim.gatewayKind().shortLabel(it, sim.nullableString("gatewayName")) } ?: "网关待确认"
+    // S95b §C: the gateway's name or its kind, never the `PX-…` / `DJI-…` id.
+    val gateway = sim.nullableString("gatewayId")?.takeIf(String::isNotBlank)?.let {
+        sim.nullableString("gatewayName")?.trim()?.takeIf(String::isNotEmpty) ?: sim.gatewayKind().deviceName
+    } ?: "网关待确认"
     return "$number · $gateway"
 }
 

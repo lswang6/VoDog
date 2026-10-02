@@ -4,6 +4,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -20,6 +21,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.automirrored.outlined.Backspace
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -89,13 +98,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleStartEffect
 import org.json.JSONObject
 
 @Composable
-internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: () -> Unit = {}) {
+internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: () -> Unit = {}, onDetailVisible: (Boolean) -> Unit = {}) {
     val haptic = LocalHapticFeedback.current
     val sims = (state.sims as? RemoteList.Loaded)?.items.orEmpty().mapNotNull {
         runCatching { it.toClientSim() }.getOrNull()
@@ -107,9 +118,9 @@ internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: 
     }
     var number by rememberSaveable { mutableStateOf("") }
     var showingKeypad by rememberSaveable { mutableStateOf(true) }
-    var phoneDetailId by rememberSaveable { mutableStateOf<String?>(null) }
+    // S95b: a 最近通话 row opens the same call detail page as 记录, in place on this tab.
+    var phoneRecordId by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
-    val phoneDetail = state.callDetail?.takeIf { it.item.callId == phoneDetailId }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     // S20 D5: poll only while this tab is on screen and the app is at least STARTED. Leaving the
@@ -125,6 +136,8 @@ internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: 
     LaunchedEffect(state.navigation) {
         val request = state.navigation
         if (request?.target == ClientNavigationTarget.DIAL) {
+            // 回拨 from the in-place detail page: close it so the dialer (and its confirm) is visible.
+            if (phoneRecordId != null) { phoneRecordId = null; model.closeHistoryRecord() }
             number = request.number
             showingKeypad = true
             listState.scrollToItem(0)
@@ -145,6 +158,15 @@ internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: 
     val recentCalls = hideMergedInternalLegs(calls).filter {
         it.optString("state") in setOf("ended", "failed") && (selectedId.isBlank() || it.optString("simId") == selectedId)
     }.take(20)
+    val openedRecord = state.openedHistoryCall?.takeIf { phoneRecordId != null && it.optString("id") == phoneRecordId }
+    LaunchedEffect(openedRecord != null) { onDetailVisible(openedRecord != null) }
+    if (openedRecord != null) {
+        BackHandler { phoneRecordId = null; model.closeHistoryRecord() }
+        HistoryDetailPage(openedRecord, simJsonById[openedRecord.optString("simId")], state, model) {
+            phoneRecordId = null; model.closeHistoryRecord()
+        }
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         ClientSimPicker(sims, selectedId, badges = state.badges?.simCalls().orEmpty()) { selectedId = it }
         LazyColumn(
@@ -156,11 +178,11 @@ internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: 
             state = listState,
         ) {
             item {
-                Card(
+                // Signal: the dialer sits straight on the page background (no card).
+                Box(
                     Modifier.padding(horizontal = ScreenPadding).fillMaxWidth().pointerInput(Unit) {
                         detectTapGestures(onTap = { /* consume outer keypad-dismiss gesture */ })
                     },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 ) {
                     Column(
                         Modifier.fillMaxWidth().padding(ScreenPadding),
@@ -174,10 +196,12 @@ internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: 
                             }
                         } else {
                             Surface(onClick = { showingKeypad = true }, color = androidx.compose.ui.graphics.Color.Transparent, modifier = Modifier.fillMaxWidth()) {
-                                Box(Modifier.height(42.dp), contentAlignment = Alignment.Center) {
+                                Box(Modifier.heightIn(min = 52.dp), contentAlignment = Alignment.Center) {
                                     Text(
                                         number.ifBlank { "输入电话号码" },
-                                        style = MaterialTheme.typography.headlineSmall,
+                                        style = if (number.isBlank()) MaterialTheme.typography.titleLarge
+                                        else MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Normal),
+                                        textAlign = TextAlign.Center,
                                         color = if (number.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                                         fontFamily = FontFamily.Monospace,
                                     )
@@ -214,36 +238,45 @@ internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: 
                             )
                             val canDial = state.networkAvailable && !state.busy && selected?.canCall == true && occupied == null &&
                                 !localMediaBlocks(null, state.media) && number.isNotBlank()
+                            // Signal: clear · Extended-FAB-style 「拨打」 (callFill, 64 high) · backspace.
                             Row(
                                 Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(34.dp, Alignment.CenterHorizontally),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                IconButton(
-                                    onClick = { if (number.isNotEmpty()) number = number.dropLast(1) },
-                                    enabled = number.isNotEmpty(),
-                                    modifier = Modifier.size(52.dp),
-                                ) { Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "删除一位") }
-                                Surface(
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    if (number.isNotEmpty()) IconButton(
+                                        onClick = { number = "" },
+                                        modifier = Modifier.size(52.dp),
+                                    ) { Icon(Icons.Filled.Close, contentDescription = "清除号码", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                }
+                                val signal = LocalSignal.current
+                                Button(
                                     onClick = { haptic.performHapticFeedback(HapticFeedbackType.Confirm); model.startCall(selectedId, number.trim()) },
                                     enabled = canDial,
-                                    modifier = Modifier.size(62.dp),
-                                    shape = CircleShape,
-                                    color = if (canDial) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.tertiaryContainer,
-                                    contentColor = if (canDial) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.heightIn(min = 64.dp).widthIn(min = 132.dp),
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = signal.callFill,
+                                        contentColor = Color.White,
+                                        disabledContainerColor = signal.surface3,
+                                        disabledContentColor = signal.ink3,
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 28.dp),
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Filled.Call,
-                                            contentDescription = selected?.let { "使用${it.displayLabel}拨打" } ?: "拨号",
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Filled.Call,
+                                        contentDescription = selected?.let { "使用${it.displayLabel}拨打" } ?: "拨号",
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("拨打", style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
                                 }
-                                IconButton(
-                                    onClick = { number = "" },
-                                    enabled = number.isNotEmpty(),
-                                    modifier = Modifier.size(52.dp),
-                                ) { Icon(Icons.Filled.Close, contentDescription = "清除号码") }
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    IconButton(
+                                        onClick = { if (number.isNotEmpty()) number = number.dropLast(1) },
+                                        enabled = number.isNotEmpty(),
+                                        modifier = Modifier.size(52.dp),
+                                    ) { Icon(Icons.AutoMirrored.Outlined.Backspace, contentDescription = "删除一位", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                }
                             }
                             unavailable?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -266,42 +299,34 @@ internal fun CallPage(state: ClientUiState, model: ClientViewModel, onShowCall: 
                     }
                 }
             }
-            // The owned call is rendered by the primary controls above, so the section only appears when
-            // there is no owned call or there are other active calls to show.
-            if (controlledCall == null || otherActiveCalls.isNotEmpty()) {
+            // The owned call is rendered by the primary controls above; this section only appears when
+            // there are other active calls to show (S95b: no 「暂无当前通话」 placeholder).
+            if (otherActiveCalls.isNotEmpty()) {
                 item { SectionHeader("当前通话") }
-                if (state.calls !is RemoteList.Loaded) item { Box(Modifier.padding(horizontal = ScreenPadding)) { RemoteStateText(state.calls) } }
-                else if (otherActiveCalls.isEmpty()) item { EmptyCard("暂无当前通话") }
-                else items(otherActiveCalls, key = { it.optString("id") }) { call ->
+                items(otherActiveCalls, key = { it.optString("id") }) { call ->
                     Box(Modifier.padding(horizontal = ScreenPadding)) { ActiveCallCard(call, state, model) }
                 }
             }
             item { SectionHeader("最近通话") }
             if (recentCalls.isEmpty()) item { EmptyCard("当前号码暂无通话记录") }
             else items(recentCalls, key = { it.optString("id") }) { call ->
-                RecentCallRow(
+                val callId = call.optString("id")
+                CallRecordRow(
                     call = call,
+                    item = parseCallHistoryItem(call, simJsonById[call.optString("simId")]),
+                    allSims = sims,
                     unseen = callShowsUnseenDot(call, state.seenCallIds),
-                    simLabel = callLineLabel(simJsonById[call.optString("simId")]),
-                    timeZone = selected?.timeZone,
-                    onInfo = { model.openContactCard(callContactCardTarget(call)) },
-                    onTranscript = {
-                        phoneDetailId = call.optString("id")
-                        model.openCallDetail(call, HistoryViewerKind.TRANSCRIPT)
-                    },
-                    onRecording = {
-                        phoneDetailId = call.optString("id")
-                        model.openCallDetail(call, HistoryViewerKind.RECORDING)
-                    },
+                    blocked = call.toContactAnnotation().blocked || blockedCallSourceLabel(call) != null,
+                    relativeTime = true,
+                    modifier = Modifier.padding(horizontal = ScreenPadding).fillMaxWidth().clip(MaterialTheme.shapes.small)
+                        .testTag("calls.recent.$callId")
+                        .clickable(enabled = callId.isNotBlank(), onClickLabel = "打开通话详情") {
+                            phoneRecordId = callId
+                            model.openHistoryRecord(call)
+                        },
                 )
             }
         }
-    }
-    if (phoneDetail?.viewer == HistoryViewerKind.TRANSCRIPT) {
-        TranscriptSheet(phoneDetail, model) { phoneDetailId = null; model.closeReportCall() }
-    }
-    if (phoneDetail?.viewer == HistoryViewerKind.RECORDING) {
-        RecordingSheet(phoneDetail, model) { phoneDetailId = null; model.closeReportCall() }
     }
     dialConfirm?.let { (sim, target) ->
         AlertDialog(
@@ -353,77 +378,6 @@ private fun OccupancyReleaseAction(call: JSONObject, state: ClientUiState, model
         },
         dismissButton = { TextButton(onClick = { confirming = false }) { Text("取消") } },
     )
-}
-
-@Composable
-private fun RecentCallRow(
-    call: JSONObject,
-    unseen: Boolean,
-    simLabel: String?,
-    timeZone: String?,
-    onInfo: () -> Unit,
-    onTranscript: () -> Unit,
-    onRecording: () -> Unit,
-) {
-    val failed = call.optString("state") == "failed"
-    Card(
-        Modifier.padding(horizontal = ScreenPadding).fillMaxWidth()
-            .testTag("calls.recent.${call.optString("id")}"),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(Modifier.padding(ScreenPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                UnreadDot(unseen, "未查看")
-                if (call.toContactAnnotation().blocked) {
-                    Icon(
-                        Icons.Filled.Block,
-                        contentDescription = "已屏蔽",
-                        Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
-                Icon(
-                    if (call.optString("direction") == "incoming") Icons.AutoMirrored.Filled.CallReceived else Icons.AutoMirrored.Filled.CallMade,
-                    contentDescription = directionLabel(call.optString("direction")),
-                    tint = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                )
-                Column(Modifier.weight(1f)) {
-                    // S36 C5-a: 有联系人时姓名单独一行，号码整行不截断。
-                    val (rowName, rowNumber) = callRowLines(call)
-                    rowName?.let {
-                        Text(it, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    PhoneNumberText(
-                        rowNumber,
-                        color = if (rowName == null) androidx.compose.ui.graphics.Color.Unspecified
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    val missedLabel = missedCallLabel(call)
-                    val missed = missedLabel != null
-                    Text(
-                        listOfNotNull(simLabel, missedLabel ?: callStateLabel(call.optString("state"))).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        formatGatewayDateTime(call.optString("startedAt"), jsonDisplayTimeZone(call, timeZone)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    talkDurationLabel(
-                        call.optString("answeredAt").takeUnless { it.isBlank() || it == "null" },
-                        call.optString("endedAt").takeUnless { it.isBlank() || it == "null" },
-                    )?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                IconButton(onClick = onInfo, modifier = Modifier.size(TouchTarget)) {
-                    Icon(Icons.Outlined.Info, contentDescription = "联系人卡片", tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-            HistoryCallActions(onTranscript = onTranscript, onRecording = onRecording)
-        }
-    }
 }
 
 /**
@@ -480,23 +434,40 @@ internal fun FullscreenCall(call: JSONObject, state: ClientUiState, model: Clien
                 })
             },
             bottomBar = {
-                Surface {
+                // Signal: 80 dp dangerFill round hang-up; while ending it turns grey, disabled, 「正在结束…」 (S46).
+                Column(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(ScreenPadding),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val signal = LocalSignal.current
                     Button(
                         onClick = { haptic.performHapticFeedback(HapticFeedbackType.Reject); model.endCall(callId) },
                         enabled = !ending,
-                        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(ScreenPadding).heightIn(min = 52.dp).testTag("call.end"),
+                        modifier = Modifier.size(80.dp).testTag("call.end")
+                            .then(if (ending) Modifier.semantics { contentDescription = "正在结束通话" } else Modifier),
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(0.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = FilledDestructiveRed,
-                            contentColor = androidx.compose.ui.graphics.Color.White,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            contentColor = Color.White,
+                            disabledContainerColor = signal.surface3,
+                            disabledContentColor = signal.ink2,
                         ),
                     ) {
-                        if (ending) CircularProgressIndicator(Modifier.size(20.dp).clearAndSetSemantics {}, color = MaterialTheme.colorScheme.onSurfaceVariant, strokeWidth = 2.dp)
-                        else Icon(Icons.Filled.CallEnd, contentDescription = if (state.media.callId == callId && state.media.phase == CallMediaPhase.FAILED) "结束这通通话" else null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (ending) "正在结束" else "结束通话")
+                        if (ending) CircularProgressIndicator(Modifier.size(28.dp).clearAndSetSemantics {}, color = signal.ink2, strokeWidth = 3.dp)
+                        else Icon(
+                            Icons.Filled.CallEnd,
+                            contentDescription = if (state.media.callId == callId && state.media.phase == CallMediaPhase.FAILED) "结束这通通话" else "结束通话",
+                            Modifier.size(34.dp),
+                        )
                     }
+                    Text(
+                        if (ending) "正在结束…" else "结束",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clearAndSetSemantics {},
+                    )
                 }
             },
         ) { padding ->
@@ -731,7 +702,7 @@ internal fun PhoneKeypad(onDigit: (String) -> Unit, onPlus: () -> Unit, enabled:
                 row.forEach { (digit, letters) ->
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         Box(
-                            Modifier.size(keySize).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                            Modifier.size(keySize).clip(CircleShape)
                                 .combinedClickable(
                                     enabled = enabled,
                                     role = Role.Button,
@@ -741,8 +712,8 @@ internal fun PhoneKeypad(onDigit: (String) -> Unit, onPlus: () -> Unit, enabled:
                             contentAlignment = Alignment.Center,
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(digit, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace, color = keyColor)
-                                Text(letters, style = lettersStyle, maxLines = 1, softWrap = false, color = keyColor)
+                                Text(digit, style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Normal), fontFamily = FontFamily.Monospace, color = keyColor)
+                                Text(letters, style = lettersStyle, maxLines = 1, softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -773,7 +744,7 @@ internal fun ActiveCallCard(call: JSONObject, state: ClientUiState, model: Clien
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End) {
                     Text(sim?.displayLabel ?: calledSimLabel(call) ?: "SIM", style = MaterialTheme.typography.labelMedium)
-                    Text(sim?.gatewayShortLabel ?: "设备待确认", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(sim?.let(::simDeviceLabel) ?: "设备待确认", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             val ownership = if (call.optBoolean("claimedByCurrentSession")) "当前登录会话" else callOwnerLabel(call)

@@ -23,10 +23,11 @@ class CallReportsTest {
 
     @Test fun callLineLabelMatchesWebNumberAndGatewayShortLabel() {
         val sim = JSONObject().put("id", "sim-1").put("label", "SIM 1").put("phoneLabel", "+8619900000101").put("gatewayId", "b3a67a31-0000")
-        assertEquals("+8619900000101 · PX-b3a67a31", callLineLabel(sim))
-        assertEquals("SIM 1 · DJI-b3a67a31", callLineLabel(JSONObject(sim.toString()).put("phoneLabel", "").put("gatewayKind", "dji4g")))
+        // S95b §C: the gateway's kind instead of its `PX-…` id.
+        assertEquals("+8619900000101 · 手机", callLineLabel(sim))
+        assertEquals("SIM 1 · DJI 4G 模组", callLineLabel(JSONObject(sim.toString()).put("phoneLabel", "").put("gatewayKind", "dji4g")))
         assertEquals("+8619900000101 · Pixel 7 Pro", callLineLabel(JSONObject(sim.toString()).put("gatewayName", "Pixel 7 Pro")))
-        assertEquals("+8619900000101 · PX-b3a67a31", callLineLabel(JSONObject(sim.toString()).put("gatewayName", JSONObject.NULL)))
+        assertEquals("+8619900000101 · 手机", callLineLabel(JSONObject(sim.toString()).put("gatewayName", JSONObject.NULL)))
         assertEquals("未命名号码 · 网关待确认", callLineLabel(JSONObject().put("phoneLabel", JSONObject.NULL).put("gatewayId", JSONObject.NULL)))
         assertNull(callLineLabel(null))
     }

@@ -9,7 +9,7 @@ final class ExpandedUIUITests: XCTestCase {
         app.launch()
         ensureLoggedIn(app)
 
-        selectTab("通话", in: app)
+        selectTab("电话", in: app)
         XCTAssertTrue(app.navigationBars["电话"].waitForExistence(timeout: 8))
         let two = app.buttons["2，ABC"]
         XCTAssertTrue(two.waitForExistence(timeout: 8), "The native dial pad is missing")
@@ -154,7 +154,7 @@ final class ExpandedUIUITests: XCTestCase {
         app.launch()
         ensureLoggedIn(app)
 
-        selectTab("通话", in: app)
+        selectTab("电话", in: app)
         XCTAssertTrue(app.navigationBars["电话"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["2，ABC"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["SIM 1"].firstMatch.waitForExistence(timeout: 15))

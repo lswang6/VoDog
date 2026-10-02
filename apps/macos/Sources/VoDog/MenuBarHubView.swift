@@ -11,6 +11,8 @@ private struct MenuBarContentHeightKey: PreferenceKey {
 struct MenuBarHubView: View {
     @EnvironmentObject private var appState: AppState
     @State private var contentHeight: CGFloat = 0
+    @State private var quickDialText = ""
+    @State private var codeCopied = false
 
     private let maximumHeight: CGFloat
     private let onDismiss: () -> Void
@@ -49,131 +51,234 @@ struct MenuBarHubView: View {
     }
 
     private var menuContent: some View {
-        AdaptiveGlassContainer(spacing: 6) {
-            VStack(spacing: 0) {
-                VStack(spacing: 8) {
-                    if appState.cellularModules.isEmpty {
-                        CellularOverviewCard(
-                            treatment: .regular,
-                            density: .compact
-                        )
-                    } else {
-                        ForEach(appState.cellularModules) { module in
-                            CellularOverviewCard(
-                                moduleID: module.id,
-                                treatment: .regular,
-                                density: .compact,
-                                onSelectModule: {
-                                    transition {
-                                        appState.showPhoneWindow(
-                                            section: .sim,
-                                            simModuleID: module.id
-                                        )
-                                    }
-                                }
-                            )
-                            .id(module.id)
-                        }
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            quickDial
+
+            if let latest = latestCodeMessage, let code = latest.verificationCode {
+                latestCodeCard(latest, code: code)
+            }
+
+            if let transientMessage = appState.transientMessage {
+                Label {
+                    Text(verbatim: transientMessage)
+                } icon: {
+                    Image(systemName: appState.transientIsError
+                        ? "exclamationmark.triangle.fill"
+                        : "checkmark.circle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(appState.transientIsError ? Signal.danger : Signal.ink3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            MenuBarCommunicationSections(
+                history: appState.callHistory,
+                onOpenMessage: { message in
+                    transition {
+                        appState.showMessagesWindow(messageID: message.id)
+                    }
+                },
+                onOpenMissedCall: { record in
+                    transition {
+                        appState.showPhoneWindow(callRecordID: record.id)
                     }
                 }
+            )
 
-                if let transientMessage = appState.transientMessage {
-                    Label {
-                        Text(verbatim: transientMessage)
-                    } icon: {
-                        Image(systemName: appState.transientIsError
-                            ? "exclamationmark.triangle.fill"
-                            : "checkmark.circle.fill")
+            footer
+        }
+        .foregroundStyle(Signal.ink)
+        .padding(.horizontal, MenuBarHubMetrics.horizontalInset)
+        .padding(.top, 14)
+        .padding(.bottom, 8)
+        .frame(width: MenuBarHubMetrics.panelWidth)
+        .background(Signal.bg)
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        Button {
+            transition { appState.showPhoneWindow(section: .sim, simModuleID: module?.id) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "phone.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Signal.onBrand)
+                    .frame(width: 30, height: 30)
+                    .background(Signal.brand, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: appName).font(.headline)
+                    HStack(spacing: 5) {
+                        if module != nil {
+                            LineBlock(color: appState.lineColor(for: module?.id), size: 8)
+                        }
+                        Text(verbatim: headerDetail).lineLimit(1)
+                        AiBadge(settings: aiSettings)
                     }
                     .font(.caption)
-                    .foregroundStyle(appState.transientIsError ? Color.red : Color.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
+                    .foregroundStyle(Signal.ink3)
                 }
-
-                MenuBarCommunicationSections(
-                    history: appState.callHistory,
-                    onOpenMessage: { message in
-                        transition {
-                            appState.showMessagesWindow(messageID: message.id)
-                        }
-                    },
-                    onOpenMissedCall: { record in
-                        transition {
-                            appState.showPhoneWindow(callRecordID: record.id)
-                        }
-                    }
-                )
-
-                Divider()
-                    .padding(.vertical, MenuBarHubMetrics.sectionSpacing)
-
-                menuDestinations
+                Spacer(minLength: 6)
+                SignalBars(bars: hasSignal ? (module?.modem.signalBars ?? 0) : 0, barWidth: 3.5, height: 14)
             }
-        }
-        .padding(.horizontal, MenuBarHubMetrics.horizontalInset)
-        .padding(.vertical, MenuBarHubMetrics.verticalInset)
-        .frame(width: MenuBarHubMetrics.panelWidth)
-    }
-
-    private var menuDestinations: some View {
-        HStack(spacing: MenuBarHubMetrics.actionSpacing) {
-            ForEach(menuDestinationSections) { section in
-                destinationButton(section)
-            }
-            menuActionButton(
-                L10n.tr("退出"),
-                systemImage: "power",
-                action: quitApplication
-            )
-            .help(L10n.tr("退出 VoDog"))
-            .accessibilityLabel(L10n.tr("退出 VoDog"))
-        }
-    }
-
-    private var menuDestinationSections: [PhoneWindowSection] {
-        [.messages, .recents, .recordings, .proxy, .sim, .voDog, .settings]
-    }
-
-    private func destinationButton(_ section: PhoneWindowSection) -> some View {
-        menuActionButton(
-            section.title,
-            systemImage: section.systemImage
-        ) {
-            transition {
-                appState.showPhoneWindow(section: section)
-            }
-        }
-        .help(section.title)
-        .accessibilityLabel(section.title)
-    }
-
-    private func menuActionButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .frame(maxWidth: .infinity, minHeight: 31)
-                .adaptiveConcentricGlassSurface(
-                    minimumCornerRadius: 16,
-                    padding: 8,
-                    treatment: .regular,
-                    isInteractive: true
-                )
-                .contentShape(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .accessibilityLabel(title)
+        .help(module?.accessibilitySummary ?? L10n.tr("没有可用模组"))
+        .accessibilityLabel([module?.accessibilitySummary ?? L10n.tr("没有可用模组"), AiBadge.accessibilityText(aiSettings)]
+            .compactMap { $0 }.joined(separator: ", "))
     }
 
-    private func quitApplication() {
-        appState.quit()
+    private var aiSettings: VoDogSIMSettings? { appState.accountSIM(for: module?.id)?.settings }
+
+    private var module: CellularModuleSummary? {
+        appState.currentCommunicationModule ?? appState.cellularModules.first
+    }
+
+    private var hasSignal: Bool {
+        module.map { $0.modem.isConnected && $0.modem.signalDBm != nil } ?? false
+    }
+
+    private var appName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? ProcessInfo.processInfo.processName
+    }
+
+    /// 「线路 · 运营商 制式」, or the module status while it is not connected.
+    private var headerDetail: String {
+        guard let module else { return L10n.tr("没有可用模组") }
+        guard module.modem.isConnected else { return module.statusText }
+        let network = [module.carrierName, module.technologyName].compactMap { $0 }.joined(separator: " ")
+        return [appState.lineName(for: module.id) ?? module.localizedDisplayName, network]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    // MARK: Quick dial
+
+    private var quickDial: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "circle.grid.3x3.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Signal.ink3)
+                TextField(L10n.tr("输入号码或姓名"), text: $quickDialText)
+                    .textFieldStyle(.plain)
+                    .onSubmit(quickDialAction)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(Signal.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Signal.line, lineWidth: 1)
+            }
+
+            Button(action: quickDialAction) {
+                Image(systemName: "phone.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Signal.callFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(L10n.tr("拨打"))
+            .accessibilityLabel(L10n.tr("拨打"))
+        }
+    }
+
+    /// Signed out with a dialable number: the dialer's own path (`AppState.dial`). Otherwise the main
+    /// window's dialer opens with the text prefilled (signed in, calls go through VoDog there).
+    private func quickDialAction() {
+        let text = quickDialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if appState.voDog.user == nil,
+           appState.call.canDial, !appState.isChangingCall,
+           CallATParser.normalizedDialNumber(text) != nil {
+            appState.dial(text)
+            quickDialText = ""
+            onDismiss()
+            return
+        }
+        transition { appState.showPhoneWindow(number: text.isEmpty ? nil : text, section: .dialer) }
+    }
+
+    // MARK: Latest verification code
+
+    private var latestCodeMessage: SMSMessage? {
+        appState.messages
+            .filter { !$0.isOutgoing && $0.verificationCode != nil }
+            .max { $0.timestamp < $1.timestamp }
+    }
+
+    private func latestCodeCard(_ message: SMSMessage, code: String) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 0) {
+                    Text(verbatim: L10n.tr("最新验证码") + " · " + CommunicationUI.displayText(message.sender) + " · ")
+                    Text(message.timestamp, style: .relative)
+                }
+                .font(.caption)
+                .foregroundStyle(Signal.ink2)
+                .lineLimit(1)
+                Text(verbatim: code)
+                    .font(.system(size: 26, weight: .semibold).monospacedDigit())
+                    .tracking(3)
+                    .foregroundStyle(Signal.brand)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 4)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code, forType: .string)
+                codeCopied = true
+            } label: {
+                Label(codeCopied ? L10n.tr("已复制") : L10n.tr("复制"),
+                      systemImage: codeCopied ? "checkmark" : "doc.on.doc")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Signal.onBrand)
+                    .padding(.horizontal, 14)
+                    .frame(height: 32)
+                    .background(Signal.brand, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("验证码 %@，点击复制", code))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Signal.brandSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onChange(of: code) { _, _ in codeCopied = false }
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 4) {
+            footerButton(L10n.tr("打开主窗口")) {
+                transition { CommunicationWindowController.shared.handleApplicationReopen() }
+            }
+            footerButton(L10n.tr("设置…")) {
+                transition { appState.showPhoneWindow(section: .settings) }
+            }
+            footerButton(L10n.tr("退出")) { appState.quit() }
+                .help(L10n.tr("退出 VoDog"))
+        }
+        .padding(.top, 6)
+        .overlay(alignment: .top) { Rectangle().fill(Signal.line).frame(height: 1) }
+    }
+
+    private func footerButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(verbatim: title)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(Signal.ink2)
+                .frame(maxWidth: .infinity, minHeight: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func transition(_ action: @escaping () -> Void) {
@@ -182,108 +287,8 @@ struct MenuBarHubView: View {
     }
 }
 
-private struct MenuHubAction: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-    let attentionCount: Int
-    let highlightsDetail: Bool
-    let attentionAccessibilityLabel: String?
-    let action: () -> Void
-
-    init(
-        title: String,
-        detail: String,
-        systemImage: String,
-        attentionCount: Int = 0,
-        highlightsDetail: Bool = false,
-        attentionAccessibilityLabel: String? = nil,
-        action: @escaping () -> Void
-    ) {
-        self.title = title
-        self.detail = detail
-        self.systemImage = systemImage
-        self.attentionCount = attentionCount
-        self.highlightsDetail = highlightsDetail
-        self.attentionAccessibilityLabel = attentionAccessibilityLabel
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 26)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: title)
-                        .font(.body.weight(.medium))
-                    Text(verbatim: detail)
-                        .font(.caption2)
-                        .foregroundStyle(highlightsDetail ? Color.red : Color.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 2)
-                if attentionCount > 0 {
-                    Text(attentionCount > 99 ? "99+" : "\(attentionCount)")
-                        .font(.caption2.bold().monospacedDigit())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.red, in: Capsule())
-                        .accessibilityLabel(
-                            attentionAccessibilityLabel ?? L10n.tr("%lld 项提醒", Int64(attentionCount))
-                        )
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-        .adaptiveConcentricGlassSurface(
-            minimumCornerRadius: 22,
-            padding: MenuBarHubMetrics.actionPadding,
-            treatment: .regular,
-            isInteractive: true
-        )
-        .frame(maxWidth: .infinity)
-    }
-}
-
-private struct MissedCallMenuHubAction: View {
-    @ObservedObject var history: CallHistoryStore
-
-    let defaultDetail: String
-    let prefersDefaultDetail: Bool
-    let action: () -> Void
-
-    private var missedCount: Int {
-        history.unacknowledgedMissedCallCount
-    }
-
-    private var showsMissedSummary: Bool {
-        missedCount > 0 && !prefersDefaultDetail
-    }
-
-    var body: some View {
-        MenuHubAction(
-            title: L10n.tr("电话"),
-            detail: showsMissedSummary ? L10n.tr("%lld 个未接", Int64(missedCount)) : defaultDetail,
-            systemImage: "phone.fill",
-            attentionCount: missedCount,
-            highlightsDetail: showsMissedSummary,
-            attentionAccessibilityLabel: L10n.tr("%lld 个未接来电", Int64(missedCount)),
-            action: action
-        )
-    }
-}
-
-private enum MenuBarHubMetrics {
-    static let panelWidth: CGFloat = 370
-    static let defaultMaximumHeight: CGFloat = 720
-    static let horizontalInset: CGFloat = 10
-    static let verticalInset: CGFloat = 8
-    static let sectionSpacing: CGFloat = 8
-    static let actionSpacing: CGFloat = 8
-    static let actionPadding: CGFloat = 10
+enum MenuBarHubMetrics {
+    static let panelWidth: CGFloat = 360
+    static let defaultMaximumHeight: CGFloat = 620
+    static let horizontalInset: CGFloat = 12
 }

@@ -24,7 +24,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.Close
@@ -76,6 +78,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -92,9 +97,9 @@ import org.json.JSONObject
  * filter. Each segment is now its own list with its own controls; 拦截记录 is unchanged.
  */
 internal enum class HistoryView(val label: String) {
-    ALL_CALLS("全部通话"),
-    REPORTS("报告"),
-    INTERCEPTIONS("拦截记录"),
+    ALL_CALLS("通话"),
+    REPORTS("转录报告"),
+    INTERCEPTIONS("拦截"),
 }
 
 @Composable
@@ -217,8 +222,6 @@ internal fun HistoryPage(state: ClientUiState, model: ClientViewModel, onDetailV
                 onPage = model::setCallsPage,
                 onPageSize = model::setCallsPageSize,
                 onOpen = { callId -> calls.firstOrNull { it.optString("id") == callId }?.let(model::openHistoryRecord) },
-                onContactCard = { model.openContactCard(callContactCardTarget(it)) },
-                onViewer = model::openHistoryViewer,
                 onDelete = model::deleteCall,
                 seenCallIds = state.seenCallIds,
             )
@@ -280,8 +283,6 @@ private fun AllCallsList(
     onPage: (Int) -> Unit,
     onPageSize: (Int) -> Unit,
     onOpen: (String) -> Unit,
-    onContactCard: (JSONObject) -> Unit,
-    onViewer: (CallReportItem, HistoryViewerKind) -> Unit,
     onDelete: (String) -> Unit,
     seenCallIds: Set<String> = emptySet(),
 ) {
@@ -294,7 +295,7 @@ private fun AllCallsList(
             LazyColumn(
                 Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(ScreenPadding),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 when (callsPage) {
                     RemoteResource.NotLoaded, RemoteResource.Loading -> item {
@@ -311,8 +312,15 @@ private fun AllCallsList(
                     is RemoteResource.Loaded -> if (calls.isEmpty()) item {
                         if (query.isNotBlank()) EmptyStateCard(Icons.Filled.Search, "没有匹配的通话", "换一个姓名或号码再试。")
                         else EmptyStateCard(Icons.Filled.History, "暂无通话记录")
-                    } else items(calls, key = { allCallsHistoryRowKey(it.optString("id")) }) { call ->
-                        AllCallsRow(call, simJsonById[call.optString("simId")], callShowsUnseenDot(call, seenCallIds), onOpen, onContactCard, onViewer, onDelete)
+                    } else {
+                        // S95b: 今天 / 昨天 / 周X / M月d日 headers; each row then only shows HH:mm.
+                        val allSims = simJsonById.values.mapNotNull { runCatching { it.toClientSim() }.getOrNull() }
+                        calls.groupBy { callDaySectionLabel(it.optString("startedAt")) }.forEach { (day, dayCalls) ->
+                            item(key = "day-$day") { SectionHeader(day) }
+                            items(dayCalls, key = { allCallsHistoryRowKey(it.optString("id")) }) { call ->
+                                AllCallsRow(call, simJsonById[call.optString("simId")], allSims, callShowsUnseenDot(call, seenCallIds), onOpen, onDelete)
+                            }
+                        }
                     }
                 }
             }
@@ -334,14 +342,12 @@ private fun AllCallsList(
 private fun AllCallsRow(
     call: JSONObject,
     sim: JSONObject?,
+    allSims: List<ClientSim>,
     unseen: Boolean,
     onOpen: (String) -> Unit,
-    onContactCard: (JSONObject) -> Unit,
-    onViewer: (CallReportItem, HistoryViewerKind) -> Unit,
     onDelete: (String) -> Unit,
 ) {
     val item = parseCallHistoryItem(call, sim)
-    val failed = call.optString("state") == "failed"
     // S38b: 拦截行本身就是被拦截的号码，哪怕联系人注解还没跟上。
     val blocked = call.toContactAnnotation().blocked || blockedCallSourceLabel(call) != null
     val callId = call.optString("id")
@@ -400,82 +406,93 @@ private fun AllCallsRow(
             }
         },
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth().clip(CardDefaults.shape).testTag("records.row").combinedClickable(
+        CallRecordRow(
+            call, item, allSims, unseen, blocked,
+            // Tap opens the call detail (转录 / 录音 / 联系人卡片 live there); long-press deletes.
+            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).testTag("records.row").combinedClickable(
                 onClick = { callId.takeIf(String::isNotBlank)?.let(onOpen) },
                 // 长按是删除的第二个入口：滑动手势在有些设备上被列表抢走，长按永远在。
                 onClickLabel = "打开通话详情",
                 onLongClickLabel = "删除这条通话记录",
                 onLongClick = { if (callId.isNotBlank()) confirming = true },
             ),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        ) {
-            Column(Modifier.padding(ScreenPadding), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    UnreadDot(unseen, "未查看")
-                    // §F: the blocked marker sits left of the direction icon, so a blocked
-                    // number is visible before the row is read.
-                    if (blocked) {
-                        Icon(
-                            Icons.Filled.Block,
-                            contentDescription = "已屏蔽",
-                            Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    Icon(
-                        if (call.optString("direction") == "incoming") Icons.AutoMirrored.Filled.CallReceived else Icons.AutoMirrored.Filled.CallMade,
-                        contentDescription = directionLabel(call.optString("direction")),
-                        tint = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    )
-                    Column(Modifier.weight(1f)) {
-                        // S36 C5-a: 有联系人时姓名单独一行，号码整行不截断。
-                        val (rowName, rowNumber) = callRowLines(call)
-                        rowName?.let {
-                            Text(it, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        PhoneNumberText(
-                            rowNumber,
-                            color = if (rowName == null) androidx.compose.ui.graphics.Color.Unspecified
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        val missedLabel = missedCallLabel(call)
-                        val missed = missedLabel != null
-                        Text(
-                            listOfNotNull(callLineLabel(sim), missedLabel ?: callStateLabel(call.optString("state"))).joinToString(" · "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        // S38: 通过手机拨打 / 忙线自动拒接 / 忙线 AI 代接 — one extra line, never a new row shape.
-                        s38CallBadgeLabel(call)?.takeIf { it != missedLabel }?.let {
-                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text(
-                            formatGatewayDateTime(item.startedAt, item.gatewayTimeZone),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        talkDurationLabel(item.answeredAt, item.endedAt)?.let {
-                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    IconButton(
-                        onClick = { onContactCard(call) },
-                        modifier = Modifier.size(TouchTarget),
-                    ) {
-                        Icon(
-                            Icons.Outlined.Info,
-                            contentDescription = "联系人卡片",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
+        )
+    }
+}
+
+/**
+ * S95b §5 unified call row, shared by 记录 and the 电话 tab's 最近通话: direction icon | name +
+ * `number · direction · duration` | line chip (+AiBadge) | HH:mm. The caller supplies click handling.
+ */
+@Composable
+internal fun CallRecordRow(
+    call: JSONObject,
+    item: CallReportItem,
+    allSims: List<ClientSim>,
+    unseen: Boolean,
+    blocked: Boolean,
+    modifier: Modifier = Modifier,
+    /** true where there are no day headers (电话 tab): the time must also say which day. */
+    relativeTime: Boolean = false,
+) {
+    val signal = LocalSignal.current
+    val missedLabel = missedCallLabel(call)
+    val ai = item.answeredByPlatform == "ai" || call.optString("conflictDisposition") == "ai_answered"
+    val (rowName, rowNumber) = callRowLines(call)
+    val large = isLargeFontScale(LocalDensity.current.fontScale)
+    val clientSim = allSims.firstOrNull { it.id == call.optString("simId") }
+    val chipAndTime: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            clientSim?.let { line ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LineBlock(simColor(line, allSims), 8.dp)
+                    Text(simPickerTitle(line), style = MaterialTheme.typography.labelMedium, color = signal.ink2, maxLines = 1)
+                    AiBadge(line.answerMode)
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                HistoryCallActions(
-                    onTranscript = { onViewer(item, HistoryViewerKind.TRANSCRIPT) },
-                    onRecording = { onViewer(item, HistoryViewerKind.RECORDING) },
-                )
             }
+            Text(if (relativeTime) callRelativeTime(item.startedAt) else callRowTime(item.startedAt), style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = signal.ink3, maxLines = 1)
+        }
+    }
+    Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.small, modifier = modifier) {
+        Column(Modifier.heightIn(min = 64.dp).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                UnreadDot(unseen, "未查看")
+                val (icon, tint) = when {
+                    blocked -> Icons.Filled.Shield to MaterialTheme.colorScheme.error
+                    ai -> Icons.Filled.AutoAwesome to signal.ai
+                    missedLabel != null -> Icons.AutoMirrored.Filled.CallReceived to MaterialTheme.colorScheme.error
+                    call.optString("direction") == "incoming" -> Icons.AutoMirrored.Filled.CallReceived to signal.ink2
+                    else -> Icons.AutoMirrored.Filled.CallMade to signal.brand
+                }
+                Box(Modifier.size(40.dp).background(if (ai) signal.aiSoft else signal.surface2, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = if (blocked) "已屏蔽" else directionLabel(call.optString("direction")), Modifier.size(20.dp), tint = tint)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        rowName?.let { androidx.compose.ui.text.AnnotatedString(it) } ?: phoneNumberTitle(rowNumber),
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = if (missedLabel != null) MaterialTheme.colorScheme.error else signal.ink,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        listOfNotNull(
+                            rowNumber.takeIf { rowName != null },
+                            missedLabel ?: s38CallBadgeLabel(call) ?: directionLabel(call.optString("direction")),
+                            // A failed call must still say so on the one-line row.
+                            callStateLabel("failed").takeIf { call.optString("state") == "failed" && missedLabel == null && !blocked },
+                            talkDurationShortLabel(item.answeredAt, item.endedAt),
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = signal.ink3,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (!large) chipAndTime()
+            }
+            // Large font: chip + time drop to their own line instead of squeezing the name.
+            if (large) Box(Modifier.padding(start = 58.dp)) { chipAndTime() }
         }
     }
 }
@@ -943,16 +960,14 @@ private fun TranscriptSection(state: RemoteResource<CallTranscript?>, onRetry: (
         }
         is RemoteResource.Loaded -> {
             val transcript = state.value
-            if (transcript == null) Text("这通电话尚无转写任务") else when (transcript.status) {
-                "queued" -> Text("转写已排队")
-                "running" -> Text("正在转写（第 ${transcript.attempts} 次处理）")
-                "retry" -> Text(
-                    "转写等待重试${transcript.nextAttemptAt?.let { " · $it" }.orEmpty()}",
-                    color = warningColor(),
-                )
-                "failed" -> MessageCard(transcript.errorMessage ?: "转写失败${transcript.errorCode?.let { "：$it" }.orEmpty()}")
-                "succeeded" -> TranscriptResultContent(transcript.result)
-                else -> Text("暂时无法识别转写状态")
+            if (transcript == null) Text("这通电话尚无转写任务") else {
+                val text = transcriptStatusText(transcript)
+                when (transcript.status) {
+                    "succeeded" -> TranscriptResultContent(transcript.result)
+                    "retry" -> Text(text.orEmpty(), color = warningColor())
+                    "failed" -> MessageCard(text.orEmpty())
+                    else -> Text(text.orEmpty())
+                }
             }
         }
     }
@@ -968,8 +983,15 @@ private fun TranscriptResultContent(result: TranscriptResult?) {
         Text("已识别为广告或推销", style = MaterialTheme.typography.bodySmall, color = warningColor())
     }
     result.summary?.takeIf(String::isNotBlank)?.let {
-        Text("摘要", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(it)
+        // Signal AI summary card: aiSoft fill, 「摘要」 in ai.
+        val signal = LocalSignal.current
+        Column(
+            Modifier.fillMaxWidth().background(signal.aiSoft, MaterialTheme.shapes.small).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("摘要", style = MaterialTheme.typography.titleSmall, color = signal.ai)
+            Text(it, color = signal.ink)
+        }
     }
     if (result.actionItems.isNotEmpty()) {
         Text("行动项", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -992,15 +1014,6 @@ private fun TranscriptResultContent(result: TranscriptResult?) {
                 }
             }
         }
-    }
-    if (result.providers.isNotEmpty()) {
-        Text(
-            result.providers.joinToString(" / ") { provider ->
-                listOfNotNull(provider.provider, provider.model, provider.version).joinToString(" · ")
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -1397,8 +1410,6 @@ private fun AllCallsListPreview() {
             onPage = {},
             onPageSize = {},
             onOpen = {},
-            onContactCard = {},
-            onViewer = { _, _ -> },
             onDelete = {},
         )
     }

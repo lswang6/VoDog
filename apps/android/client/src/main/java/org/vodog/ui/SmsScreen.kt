@@ -117,6 +117,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -126,7 +139,6 @@ internal fun SmsPage(
     model: ClientViewModel,
     composing: Boolean,
     onComposingChange: (Boolean) -> Unit,
-    onCanComposeChange: (Boolean) -> Unit,
     onDetailVisible: (Boolean) -> Unit,
 ) {
     val sims = (state.sims as? RemoteList.Loaded)?.items.orEmpty().mapNotNull {
@@ -150,10 +162,7 @@ internal fun SmsPage(
         model.startForegroundRefresh(ClientRefreshScope.SMS)
         onStopOrDispose { model.stopForegroundRefresh(ClientRefreshScope.SMS) }
     }
-    // The compose affordance lives in the top app bar, so its enablement has to travel upwards.
-    LaunchedEffect(selected?.id, account) {
-        onCanComposeChange(selected?.id?.isNotBlank() == true && account.isNotBlank())
-    }
+    val canCompose = selected?.id?.isNotBlank() == true && account.isNotBlank()
     // The compose sheet is a ModalBottomSheet now; only the pushed conversation hides the top bar.
     LaunchedEffect(opened != null) { onDetailVisible(opened != null) }
     // S21 §F: "发送短信" on the contact card opens the composer with the recipient already filled.
@@ -176,15 +185,19 @@ internal fun SmsPage(
         SmsConversationPage(state, model, selected, opened, account) { openConversation = null }
         return
     }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         ClientSimPicker(sims, selectedId, badges = state.badges?.simSms().orEmpty()) { selectedId = it; openConversation = null }
+        if (state.networkAvailable && selected != null && !selected.online) {
+            LineOfflineBanner(selected, sims, "收发短信暂不可用，设备恢复在线后自动同步。")
+        }
         LazyColumn(
             Modifier.fillMaxWidth().weight(1f),
             state = conversationListState,
-            contentPadding = PaddingValues(bottom = ScreenPadding),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            // Bottom room so the last row clears the 新短信 FAB.
+            contentPadding = PaddingValues(bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            item { SectionHeader("会话") }
             if (state.sms !is RemoteList.Loaded) {
                 item { Box(Modifier.padding(horizontal = ScreenPadding)) { RemoteStateText(state.sms) } }
             } else if (conversations.isEmpty()) {
@@ -202,7 +215,6 @@ internal fun SmsPage(
                     ConversationRow(
                         conversation = conversation,
                         unread = conversationShowsUnreadDot(conversation.messages, state.readSmsIds),
-                        simLabel = selected?.displayLabel ?: "SIM",
                         revealedThread = revealedThread,
                         onRevealed = { revealedThread = conversation.key.storageKey },
                         onClick = { openConversation = conversation.key.storageKey },
@@ -218,6 +230,20 @@ internal fun SmsPage(
                 }
             }
         }
+    }
+        // Signal: 新短信 is an Extended FAB (was the top-bar edit icon); same action and a11y label.
+        ExtendedFloatingActionButton(
+            onClick = { if (canCompose && !state.busy) onComposingChange(true) },
+            icon = { Icon(Icons.Filled.EditNote, null) },
+            text = { Text("新短信", maxLines = 1, softWrap = false) },
+            containerColor = if (canCompose && !state.busy) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = if (canCompose && !state.busy) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(ScreenPadding).heightIn(min = 56.dp)
+                .semantics {
+                    contentDescription = "新短信"
+                    if (!canCompose || state.busy) disabled()
+                },
+        )
     }
     if (composing) {
         ComposeSmsSheet(
@@ -256,7 +282,6 @@ private enum class ThreadReveal { CLOSED, OPEN }
 private fun ConversationRow(
     conversation: SmsConversation,
     unread: Boolean,
-    simLabel: String,
     revealedThread: String?,
     onRevealed: () -> Unit,
     onClick: () -> Unit,
@@ -264,7 +289,6 @@ private fun ConversationRow(
     onDelete: (Boolean) -> Unit,
 ) {
     val latest = conversation.latest
-    val incoming = latest.direction == "incoming"
     val storageKey = conversation.key.storageKey
     val canBlock = canBlockSmsThread(conversation)
     val scope = rememberCoroutineScope()
@@ -344,7 +368,7 @@ private fun ConversationRow(
             },
         )
     }
-    Box(Modifier.padding(horizontal = ScreenPadding).fillMaxWidth().clip(CardDefaults.shape)) {
+    Box(Modifier.padding(horizontal = ScreenPadding).fillMaxWidth().clip(MaterialTheme.shapes.small)) {
         Row(Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
             // iOS 是参照：「删除」贴着屏幕边（最外侧），「删除并屏蔽」在它里面。两项都是危险操作，
             // 统一使用 error 红底和白字；Arrangement.End 下声明顺序就是从内到外。
@@ -363,71 +387,95 @@ private fun ConversationRow(
                 tag = "threads.delete",
             ) { confirming = false }
         }
-        Card(
+        val signal = LocalSignal.current
+        val code = smsVerificationCode(latest.body)
+        val clipboard = LocalClipboard.current
+        val stacked = isLargeFontScale(LocalDensity.current.fontScale)
+        Surface(
             modifier = Modifier
                 .offset { IntOffset(drag.offset.takeIf { !it.isNaN() }?.roundToInt() ?: 0, 0) }
                 .fillMaxWidth()
                 .anchoredDraggable(drag, Orientation.Horizontal)
                 .testTag("threads.row")
+                .semantics { if (unread) stateDescription = "未读" }
                 .combinedClickable(
                     onClick = { if (drag.currentValue == ThreadReveal.CLOSED) onClick() else close() },
                     onLongClickLabel = "删除这段对话",
                     onLongClick = { actionSheet = true },
                 ),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            color = MaterialTheme.colorScheme.background,
         ) {
-            Column(Modifier.padding(ScreenPadding), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    UnreadDot(unread, "未读", Modifier.padding(end = 6.dp))
-                    // §F: the blocked marker sits left of the thread title, as on the 记录 rows.
-                    if (conversation.contact.blocked) {
-                        Icon(
-                            Icons.Filled.Block,
-                            contentDescription = "已屏蔽",
-                            Modifier.size(16.dp).padding(end = 2.dp),
-                            tint = MaterialTheme.colorScheme.error,
+            Row(Modifier.padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // The avatar is the contact-card entry (was the trailing ⓘ button).
+                Surface(
+                    onClick = onInfo,
+                    shape = CircleShape,
+                    color = signal.surface3,
+                    contentColor = signal.ink2,
+                    modifier = Modifier.size(TouchTarget).semantics { contentDescription = "联系人卡片" },
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        val initial = conversation.title.trim().firstOrNull()
+                        if (initial == null || initial.isDigit() || initial == '+') Icon(Icons.AutoMirrored.Filled.Message, null, Modifier.size(20.dp))
+                        else Text(initial.toString(), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    val time: @Composable () -> Unit = {
+                        Text(
+                            compactListTime(latest.timestamp),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (unread) signal.brand else signal.ink3,
+                            maxLines = 1,
                         )
                     }
-                    PhoneNumberText(
-                        conversation.title,
-                        Modifier.weight(1f),
-                    )
-                    IconButton(onClick = onInfo, modifier = Modifier.size(TouchTarget)) {
-                        Icon(Icons.Outlined.Info, contentDescription = "联系人卡片", tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                // Own line so a long service number keeps the whole title row.
-                Text(
-                    displayDateTime(latest.timestamp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    latest.body.ifBlank { "（空短信）" },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(
-                        if (incoming) Icons.AutoMirrored.Filled.CallReceived else Icons.AutoMirrored.Filled.CallMade,
-                        null,
-                        Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        smsRowCaption(latest, simLabel),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (latest.raw.optBoolean("missingParts")) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Filled.Warning, null, Modifier.size(14.dp), tint = warningColor())
-                        Text("短信缺少分段", style = MaterialTheme.typography.labelSmall, color = warningColor())
+                        // §F: the blocked marker sits left of the thread title, as on the 记录 rows.
+                        if (conversation.contact.blocked) {
+                            Icon(Icons.Filled.Block, contentDescription = "已屏蔽", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                        }
+                        Text(
+                            phoneNumberTitle(conversation.title),
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = if (stacked) 2 else 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (!stacked) time()
+                    }
+                    if (stacked) time()
+                    Text(
+                        latest.body.ifBlank { "（空短信）" },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (unread) signal.ink else signal.ink2,
+                    )
+                    // S95b: no 「收到 · <own number>」 meta line; only a state that needs attention (排队中 / 失败 / 待确认).
+                    if (latest.state !in setOf("sent", "delivered", "received")) {
+                        Text(smsStateLabel(latest), style = MaterialTheme.typography.labelSmall, color = warningColor(), maxLines = 1)
+                    }
+                    if (latest.raw.optBoolean("missingParts")) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Filled.Warning, null, Modifier.size(14.dp), tint = warningColor())
+                            Text("短信缺少分段", style = MaterialTheme.typography.labelSmall, color = warningColor())
+                        }
+                    }
+                    if (code != null) {
+                        OutlinedButton(
+                            onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("验证码", code))) } },
+                            modifier = Modifier.heightIn(min = TouchTarget).testTag("threads.copyCode"),
+                            shape = MaterialTheme.shapes.small,
+                            border = BorderStroke(1.dp, signal.line),
+                            contentPadding = PaddingValues(horizontal = 14.dp),
+                        ) {
+                            Icon(Icons.Filled.ContentCopy, null, Modifier.size(18.dp), tint = signal.brand)
+                            Spacer(Modifier.width(8.dp))
+                            Text("复制 ", color = signal.brand)
+                            Text(code, color = signal.brand, fontFamily = FontFamily.Monospace)
+                        }
                     }
                 }
             }
@@ -999,5 +1047,16 @@ private fun openSmsLink(context: Context, url: String) {
         context.startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, "没有可打开链接的应用", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Signal 「号码设备离线」 banner for the selected line (existing `online` signal only). */
+@Composable
+internal fun LineOfflineBanner(sim: ClientSim, sims: List<ClientSim>, detail: String) {
+    StatusBanner(StatusBannerKind.LINE_OFFLINE, detail, Modifier.padding(horizontal = ScreenPadding, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LineBlock(simColor(sim, sims), 8.dp)
+            Text(simPickerTitle(sim), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }

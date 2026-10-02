@@ -3,10 +3,12 @@ import AppKit
 import SwiftUI
 
 enum CommunicationUI {
-    static let railWidth: CGFloat = 76
-    static let sidebarWidth: CGFloat = 280
+    static let navigationWidth: CGFloat = 220
+    static let sidebarWidth: CGFloat = 300
     static let sidebarMinimumWidth: CGFloat = 210
     static let sidebarMaximumWidth: CGFloat = 420
+    /// Rows sit ~16pt from the column edge (6 inset + 10 highlight padding), like the mockups.
+    static let listRowInsets = EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6)
 
     static func listTimestamp(_ date: Date, now: Date = Date()) -> String {
         let calendar = Calendar.current
@@ -138,53 +140,25 @@ private struct CommunicationSearchFieldModifier: ViewModifier {
         content
             .textFieldStyle(.plain)
             .padding(.horizontal, 10)
-            .frame(height: 32)
-            .adaptiveGlassSurface(
-                cornerRadius: 12,
-                padding: 0,
-                treatment: .clear,
-                isInteractive: true
-            )
+            .frame(height: 30)
+            .background(Signal.surface2, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
 private struct CommunicationSidebarColumnModifier: ViewModifier {
-    private let backgroundFillOpacity = 0.34
-
     func body(content: Content) -> some View {
         content
             .padding(.top, 10)
-            .background {
-                ZStack {
-                    CommunicationSidebarMaterial()
-
-                    Color(nsColor: .windowBackgroundColor)
-                        .opacity(backgroundFillOpacity)
-                }
-                .ignoresSafeArea(edges: .vertical)
+            .background { Signal.chrome.ignoresSafeArea(edges: .vertical) }
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(Signal.line).frame(width: 1).ignoresSafeArea(edges: .vertical)
             }
     }
 }
 
 private struct CommunicationDetailColumnModifier: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .background {
-                GeometryReader { proxy in
-                    // Keep the Liquid Glass boundary outside the visible detail
-                    // column so its system-drawn leading rim is not rendered as
-                    // a divider between the sidebar and the detail content.
-                    AdaptiveGlassBackdrop(treatment: .regular)
-                        .frame(
-                            width: proxy.size.width + 24,
-                            height: proxy.size.height
-                        )
-                        .offset(x: -24)
-                }
-                .clipped()
-                .ignoresSafeArea(.container, edges: .vertical)
-                .allowsHitTesting(false)
-            }
+        content.background { Signal.chrome.ignoresSafeArea(.container, edges: .vertical) }
     }
 }
 
@@ -200,49 +174,16 @@ private struct CommunicationInitialListFocusModifier: ViewModifier {
     }
 }
 
-private struct CommunicationModuleFloatingSidebarModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear
-                    .frame(height: 48)
-                    .allowsHitTesting(false)
-            }
-            .overlay(alignment: .bottom) {
-                CommunicationModuleFloatingCard()
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-            }
-    }
-}
-
-private struct CommunicationModuleFloatingCard: View {
-    var body: some View {
-        AdaptiveGlassContainer(spacing: 0) {
-            CommunicationModuleStatusMenu {
-                CommunicationWindowController.shared.showPhone(section: .sim)
-            }
-        }
-        .shadow(color: .black.opacity(0.11), radius: 9, y: 4)
-        .accessibilityElement(children: .contain)
-    }
-}
-
 extension View {
-    /// Uses the same quiet, rounded selection treatment as the Settings sidebar.
+    /// Native macOS list selection: brand solid fill, onBrand text (secondary styles derive from it).
     func communicationSelectionHighlight(_ isSelected: Bool) -> some View {
-        padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.12))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.7)
-                        }
-                }
-            }
+        padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .foregroundStyle(isSelected ? AnyShapeStyle(Signal.onBrand) : AnyShapeStyle(.primary))
+            .background(isSelected ? Signal.brand : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .environment(\.signalRowSelected, isSelected)
+            .listRowInsets(CommunicationUI.listRowInsets)
     }
 
     func communicationSidebarMaterial() -> some View {
@@ -262,10 +203,6 @@ extension View {
 
     func communicationDetailColumnStyle() -> some View {
         modifier(CommunicationDetailColumnModifier())
-    }
-
-    func communicationModuleFloatingSidebar() -> some View {
-        modifier(CommunicationModuleFloatingSidebarModifier())
     }
 
     /// Kept as the common hook for communication lists. Selection visuals are

@@ -37,12 +37,36 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 
 /**
  * S21 §F 记录详情页 — opened by tapping a 记录 row. Top: 拨打 / 短信 / 信息(i). Middle: the call's own
  * facts, then the existing 查看转录 / 查看录音 sheets unchanged. Bottom: an "AI 对话" group whenever
  * `GET /calls/:id/ai-transcript` has anything to show.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun HistoryDetailPage(
     call: JSONObject,
@@ -57,6 +81,7 @@ internal fun HistoryDetailPage(
     val number = call.optString("remoteNumber")
     val aiTranscript = state.aiTranscripts[callId]
     val detail = state.callDetail?.takeIf { it.item.callId == callId }
+    val sims = (state.sims as? RemoteList.Loaded)?.items.orEmpty().mapNotNull { runCatching { it.toClientSim() }.getOrNull() }
     LaunchedEffect(callId, state.networkAvailable) {
         if (state.networkAvailable && callId.isNotBlank()) model.loadAiTranscript(callId)
     }
@@ -66,18 +91,67 @@ internal fun HistoryDetailPage(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
+            // Signal single-line top bar: back · 通话详情 · more.
+            var menu by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack, modifier = Modifier.size(TouchTarget)) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回记录")
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(phoneNumberTitle(callTitle(call)), style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        listOf(item.sim.label, directionLabel(item.direction), callStateLabel(call.optString("state")))
-                            .joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Text("通话详情", Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.titleLarge, maxLines = 1)
+                Box {
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(TouchTarget)) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("联系人卡片") }, onClick = { menu = false; model.openContactCard(callContactCardTarget(call)) })
+                        DropdownMenuItem(text = { Text("查看转录") }, enabled = state.networkAvailable,
+                            onClick = { menu = false; model.openCallDetail(call, HistoryViewerKind.TRANSCRIPT) })
+                        DropdownMenuItem(text = { Text("查看录音") }, enabled = state.networkAvailable,
+                            onClick = { menu = false; model.openCallDetail(call, HistoryViewerKind.RECORDING) })
+                    }
+                }
+            }
+        }
+        item {
+            val signal = LocalSignal.current
+            val title = callTitle(call)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Box(Modifier.size(56.dp).background(signal.surface3, CircleShape), contentAlignment = Alignment.Center) {
+                        val initial = title.trim().firstOrNull()
+                        if (initial == null || initial.isDigit() || initial == '+') Icon(Icons.Filled.Call, null, tint = signal.ink2)
+                        else Text(initial.toString(), style = MaterialTheme.typography.titleLarge, color = signal.ink2)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(phoneNumberTitle(item.contactName ?: title), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                        if (item.contactName != null && number.isNotBlank()) {
+                            Text(number, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = signal.ink3)
+                        }
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val tag = Modifier.heightIn(min = 32.dp)
+                    Row(tag.background(signal.surface2, MaterialTheme.shapes.extraSmall).padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        sims.firstOrNull { it.id == item.sim.id }?.let { LineBlock(simColor(it, sims)) }
+                        Text(item.sim.label, style = MaterialTheme.typography.bodyMedium, color = signal.ink2)
+                    }
+                    if (item.answeredByPlatform == "ai" || call.optString("conflictDisposition") == "ai_answered") {
+                        Box(tag.background(signal.aiSoft, MaterialTheme.shapes.extraSmall).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                            Text("AI 代接", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = signal.ai)
+                        }
+                    }
+                    Box(tag, contentAlignment = Alignment.Center) {
+                        Text(
+                            listOfNotNull(
+                                directionLabel(item.direction),
+                                formatGatewayDateTime(item.startedAt, item.gatewayTimeZone),
+                                talkDurationShortLabel(item.answeredAt, item.endedAt),
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = signal.ink3,
+                        )
+                    }
                 }
             }
         }
@@ -95,6 +169,54 @@ internal fun HistoryDetailPage(
                 onSms = { model.requestSms(number) },
                 onInfo = { model.openContactCard(callContactCardTarget(call)) },
             )
+        }
+        item {
+            // Signal recording card. Playback, source switch and download stay in the existing sheet
+            // (it owns manifest loading); no waveform — there is no decoded amplitude data here.
+            val signal = LocalSignal.current
+            SignalCard("通话录音") {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Surface(
+                        onClick = { model.openCallDetail(call, HistoryViewerKind.RECORDING) },
+                        enabled = state.networkAvailable,
+                        shape = RoundedCornerShape(16.dp),
+                        color = signal.brand,
+                        contentColor = signal.onBrand,
+                        modifier = Modifier.size(56.dp).testTag("history.detail.recording"),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, contentDescription = "查看录音", Modifier.size(30.dp)) }
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        LinearProgressIndicator(
+                            progress = { 0f },
+                            modifier = Modifier.fillMaxWidth().height(6.dp),
+                            trackColor = signal.surface3,
+                            drawStopIndicator = {},
+                        )
+                        Text(
+                            listOfNotNull(recordingStatusLabel(item.recordingStatus), talkDurationShortLabel(item.answeredAt, item.endedAt))
+                                .joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = signal.ink3,
+                        )
+                    }
+                }
+            }
+        }
+        val aiSegments = (aiTranscript as? RemoteResource.Loaded)?.value.orEmpty()
+        if (!state.networkAvailable && aiTranscript !is RemoteResource.Loaded) item {
+            Text("AI 对话未加载，联网后读取", Modifier.testTag("history.detail.offline"),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if (aiTranscript is RemoteResource.Loading) item { LoadingRow("正在读取 AI 对话…") }
+        item {
+            SignalCard("转录") {
+                if (aiSegments.isNotEmpty()) AiTranscriptLines(aiSegments)
+                FilledTonalButton(
+                    onClick = { model.openCallDetail(call, HistoryViewerKind.TRANSCRIPT) },
+                    enabled = state.networkAvailable,
+                    modifier = Modifier.heightIn(min = TouchTarget),
+                ) { Text("查看录音转录") }
+            }
         }
         item {
             Card(
@@ -122,29 +244,7 @@ internal fun HistoryDetailPage(
                 }
             }
         }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = { model.openCallDetail(call, HistoryViewerKind.TRANSCRIPT) },
-                    enabled = state.networkAvailable,
-                    modifier = Modifier.weight(1f).heightIn(min = TouchTarget),
-                ) { Text("查看转录") }
-                OutlinedButton(
-                    onClick = { model.openCallDetail(call, HistoryViewerKind.RECORDING) },
-                    enabled = state.networkAvailable,
-                    modifier = Modifier.weight(1f).heightIn(min = TouchTarget),
-                ) { Text("查看录音") }
-            }
-        }
-        val aiSegments = (aiTranscript as? RemoteResource.Loaded)?.value.orEmpty()
-        if (!state.networkAvailable && aiTranscript !is RemoteResource.Loaded) item {
-            Text("AI 对话未加载，联网后读取", Modifier.testTag("history.detail.offline"),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else if (aiTranscript is RemoteResource.Loading) item { LoadingRow("正在读取 AI 对话…") }
-        if (aiSegments.isNotEmpty()) {
-            item { InlineSectionHeader("AI 对话") }
-            item { AiTranscriptCard(aiSegments) }
-        }
+
     }
     if (detail?.viewer == HistoryViewerKind.TRANSCRIPT) TranscriptSheet(detail, model, model::closeReportCall)
     if (detail?.viewer == HistoryViewerKind.RECORDING) RecordingSheet(detail, model, model::closeReportCall)
@@ -161,28 +261,48 @@ internal fun AiTranscriptCard(segments: List<ClientAiTranscriptSegment>) {
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(ScreenPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Filled.SmartToy, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
+        Column(Modifier.padding(ScreenPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) { AiTranscriptLines(segments) }
+    }
+}
+
+/** Speaker-colored lines: AI in `ai`, the other side in ink; times monospaced (S92). */
+@Composable
+private fun AiTranscriptLines(segments: List<ClientAiTranscriptSegment>) {
+    val signal = LocalSignal.current
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Filled.SmartToy, null, Modifier.size(18.dp), tint = signal.ai)
+        Text(
+            "AI 实时转写（与录音转录分开保存）",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    segments.forEach { segment ->
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.widthIn(min = 44.dp)) {
                 Text(
-                    "AI 实时转写（与录音转录分开保存）",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    aiTranscriptRoleLabel(segment.role),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (segment.role == "ai") signal.ai else signal.ink,
                 )
-            }
-            segments.forEach { segment ->
-                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Text(
-                        listOfNotNull(
-                            aiTranscriptRoleLabel(segment.role),
-                            segment.at?.let(::displayDateTime),
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(segment.text, style = MaterialTheme.typography.bodyMedium)
+                segment.at?.let {
+                    Text(displayDateTime(it).takeLast(5), style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace, color = signal.ink3)
                 }
             }
+            Text(segment.text, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+/** Signal surface card with a 17 Semibold section title. */
+@Composable
+private fun SignalCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(ScreenPadding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            content()
         }
     }
 }
@@ -201,31 +321,35 @@ internal fun CallDetailActionRow(
     val stacked = isLargeFontScale(LocalDensity.current.fontScale)
     val buttonModifier = if (stacked) Modifier.fillMaxWidth() else Modifier
     val buttons: @Composable (Modifier) -> Unit = { slot ->
+        val signal = LocalSignal.current
         FilledTonalButton(
             onClick = onDial,
             enabled = LocalNetworkAvailable.current && dialable,
             modifier = slot.then(buttonModifier).heightIn(min = 52.dp).testTag("history.detail.dial"),
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = signal.callSoft, contentColor = signal.call),
         ) {
             Icon(Icons.Filled.Call, null)
             Spacer(Modifier.width(6.dp))
-            Text("拨打")
+            Text("回拨", maxLines = 1, softWrap = false)
         }
         FilledTonalButton(
             onClick = onSms,
             enabled = dialable,
             modifier = slot.then(buttonModifier).heightIn(min = 52.dp).testTag("history.detail.smsDraft"),
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = signal.surface2, contentColor = signal.ink),
         ) {
             Icon(Icons.AutoMirrored.Filled.Message, null)
             Spacer(Modifier.width(6.dp))
-            Text("短信")
+            Text("短信", maxLines = 1, softWrap = false)
         }
-        OutlinedButton(
+        FilledTonalButton(
             onClick = onInfo,
             modifier = slot.then(buttonModifier).heightIn(min = 52.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = signal.surface2, contentColor = signal.ink),
         ) {
-            Icon(Icons.Outlined.Info, null)
+            Icon(Icons.Outlined.Person, null)
             Spacer(Modifier.width(6.dp))
-            Text("信息")
+            Text("联系人", maxLines = 1, softWrap = false)
         }
     }
     if (stacked) {

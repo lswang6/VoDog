@@ -1,9 +1,188 @@
 import Foundation
 import SwiftUI
 
+/// S95 line chip: line-color rounded square + name + optional tail digits + status shape (never color alone).
+enum LineStatus: Equatable { case online, offline, pending }
+
+extension LineStatus {
+    /// Shape only for what the current snapshot actually states; device-offline / unknown shows no shape.
+    @MainActor init?(sim: SIMChannel, availability: UIAvailabilityState) {
+        if sim.assignmentPending == true { self = .pending; return }
+        switch availability.simStatus(sim) {
+        case "在线": self = .online
+        case "号码设备离线": self = .offline
+        default: return nil
+        }
+    }
+}
+
+struct SimStatusShape: View {
+    let status: LineStatus
+    @ScaledMetric(relativeTo: .caption) private var size: CGFloat = 8
+    var body: some View {
+        Group {
+            switch status {
+            case .online: Circle().fill(Signal.call)
+            case .offline: Circle().strokeBorder(Signal.ink3, lineWidth: 1.5)
+            case .pending:
+                Circle().strokeBorder(Signal.warn, lineWidth: 1.5)
+                    .background(Circle().trim(from: 0.25, to: 0.75).fill(Signal.warn).rotationEffect(.degrees(90)))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The 8–10 pt rounded square that carries a line's color.
+struct SimSwatch: View {
+    let color: Color
+    @ScaledMetric(relativeTo: .subheadline) private var size: CGFloat = 9
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.28).fill(color).frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Last four digits of a line's own number, for the chip tail.
+func simTailDigits(_ sim: SIMChannel) -> String? {
+    let digits = (sim.phoneLabel ?? "").filter(\.isNumber)
+    return digits.count >= 4 ? String(digits.suffix(4)) : nil
+}
+
+/// S95b §A: a line answered by AI is recognisable everywhere it appears. Shown iff mode != normal.
+struct AiBadge: View {
+    let mode: String
+    var timeoutSeconds: Int? = nil
+    /// Compact `AI` inside chips; full `AI 代接` / `AI · N 秒后` in settings rows.
+    var full = false
+
+    init?(mode: String?, timeoutSeconds: Int? = nil, full: Bool = false) {
+        guard let mode, Self.text(mode: mode, timeoutSeconds: timeoutSeconds, full: full) != nil else { return nil }
+        self.mode = mode
+        self.timeoutSeconds = timeoutSeconds
+        self.full = full
+    }
+
+    init?(sim: SIMChannel, full: Bool = false) {
+        self.init(mode: sim.settings?.mode, timeoutSeconds: sim.settings?.timeoutSeconds, full: full)
+    }
+
+    static func text(mode: String, timeoutSeconds: Int?, full: Bool) -> String? {
+        switch ReceptionMode(rawValue: mode) {
+        case .ai: full ? "AI 代接" : "AI"
+        case .timeoutAI:
+            !full ? "AI" : (timeoutSeconds.map { "AI · \($0) 秒后" } ?? "AI 兜底")
+        case .normal, nil: nil
+        }
+    }
+
+    static func accessibility(mode: String, timeoutSeconds: Int?) -> String? {
+        switch ReceptionMode(rawValue: mode) {
+        case .ai: "AI 代接已开启，立即由 AI 接听"
+        case .timeoutAI:
+            timeoutSeconds.map { "AI 代接已开启，响铃 \($0) 秒无人接听后由 AI 接听" } ?? "AI 代接已开启，无人接听后由 AI 接听"
+        case .normal, nil: nil
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "sparkle").font(.caption2.weight(.bold))
+            Text(Self.text(mode: mode, timeoutSeconds: timeoutSeconds, full: full) ?? "")
+                .font(.caption2.weight(.semibold)).tracking(0.2).monospacedDigit().lineLimit(1)
+        }
+        .foregroundStyle(Signal.ai)
+        .padding(.horizontal, 6)
+        .frame(minHeight: 18)
+        .background(Signal.aiSoft, in: Capsule())
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Self.accessibility(mode: mode, timeoutSeconds: timeoutSeconds) ?? "")
+    }
+}
+
+struct SimChip: View {
+    let name: String
+    let color: Color
+    var tail: String? = nil
+    var detail: String? = nil
+    var ai: AiBadge? = nil
+    var status: LineStatus? = nil
+    var selected = false
+    /// Rows and banners use the 24 pt form; the title-row selector uses 40 pt.
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SimSwatch(color: color)
+            Text(name).font((compact ? Font.footnote : .subheadline).weight(.semibold)).foregroundStyle(Signal.ink)
+                .lineLimit(1)
+            if let detail { Text(detail).font(compact ? .footnote : .subheadline).foregroundStyle(Signal.ink2).lineLimit(1) }
+            if let tail { Text(tail).font(compact ? .footnote : .subheadline).monospacedDigit().foregroundStyle(Signal.ink2) }
+            if let ai { ai }
+            if let status {
+                SimStatusShape(status: status)
+                if status == .offline { Text("离线").font(compact ? .footnote : .subheadline).foregroundStyle(Signal.ink2) }
+            }
+        }
+        .padding(.horizontal, compact ? 8 : 14)
+        .frame(minHeight: compact ? 24 : 40)
+        .background(selected ? Signal.brandSoft : Signal.surface2, in: Capsule())
+        .overlay { if selected { Capsule().strokeBorder(Signal.brand, lineWidth: 1.5) } }
+    }
+}
+
+extension SimChip {
+    init(sim: SIMChannel, in sims: [SIMChannel], status: LineStatus? = nil, selected: Bool = false,
+         compact: Bool = false, showsTail: Bool = true) {
+        self.init(name: simDisplayName(sim), color: SIMPalette.color(for: sim, in: sims),
+                  tail: showsTail ? simTailDigits(sim) : nil, ai: AiBadge(sim: sim), status: status, selected: selected,
+                  compact: compact)
+    }
+}
+
+/// S95 status banner: three connection kinds (spec §1.3), icon + bold title + one sentence.
+struct StatusBanner: View {
+    enum Kind { case deviceOffline, serviceUnavailable, gatewayOffline }
+    let kind: Kind
+    let title: String
+    let message: String
+    var chip: SimChip? = nil
+
+    private var icon: String {
+        switch kind {
+        case .deviceOffline: "wifi.slash"
+        case .serviceUnavailable: "exclamationmark.icloud"
+        case .gatewayOffline: "antenna.radiowaves.left.and.right.slash"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: icon).font(.subheadline.weight(.semibold))
+                .foregroundStyle(kind == .serviceUnavailable ? Signal.warn : Signal.ink2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    if let chip { chip }
+                }
+                Text(message).font(.footnote).fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(kind == .serviceUnavailable ? Signal.warn : Signal.ink)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(kind == .serviceUnavailable ? Signal.warnSoft : Signal.surface2, in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The horizontal chip row under a page title. Online lines are listed first (display only); tapping selects.
 struct SIMStrip: View {
     @Environment(UIAvailabilityState.self) private var availability
-    @ScaledMetric(relativeTo: .subheadline) private var labelMaxWidth = 240
     let sims: [SIMChannel]
     @Binding var selectedID: String?
     /// S20 decision 8: before the first response, "没有已分配的 SIM" is a lie. Callers that have no load state
@@ -14,45 +193,33 @@ struct SIMStrip: View {
 
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 if sims.isEmpty, !loaded {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("正在读取号码…").foregroundStyle(.secondary)
+                        Text("正在读取号码…").foregroundStyle(Signal.ink2)
                     }
                     .padding(.horizontal, 4)
                     .accessibilityLabel("正在读取号码")
                 } else if sims.isEmpty {
                     Label("没有已分配的 SIM", systemImage: "simcard")
-                        .foregroundStyle(.secondary).padding(.horizontal, 4)
+                        .foregroundStyle(Signal.ink2).padding(.horizontal, 4)
                 }
                 ForEach(SIMStripDisplayPolicy.items(sims, networkAvailable: availability.path == .available), id: \.element.id) { index, sim in
                     let status = availability.simStatus(sim)
                     Button { selectedID = sim.id } label: {
-                        HStack(spacing: 8) {
-                            Circle().fill(status == "在线" ? Color(uiColor: .systemGreen) : Color.secondary).frame(width: 8, height: 8)
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 6) {
-                                    Text(SIMStripDisplayPolicy.title(sim, originalIndex: index))
-                                        .font(.subheadline.weight(.semibold)).lineLimit(1)
-                                        .foregroundStyle(selectedID == sim.id ? SIMPalette.onColor : SIMPalette.color(for: sim, in: sims))
-                                    if let badge = SIMStripDisplayPolicy.answerModeBadge(sim) {
-                                        Text(badge).font(.caption2.weight(.semibold)).lineLimit(1).fixedSize()
-                                            .padding(.horizontal, 6).padding(.vertical, 1)
-                                            .overlay(Capsule().strokeBorder(lineWidth: 1).opacity(0.5))
-                                    }
-                                }
-                                Text("\(simCompactDetail(sim)) · \(status)")
-                                    .font(.caption).lineLimit(1).truncationMode(.middle)
-                            }
-                            .frame(maxWidth: labelMaxWidth, alignment: .leading)
-                        }
-                        .foregroundStyle(selectedID == sim.id ? SIMPalette.onColor : Color.primary)
-                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        SimChip(
+                            name: SIMStripDisplayPolicy.title(sim, originalIndex: index),
+                            color: SIMPalette.color(for: sim, in: sims),
+                            tail: simTailDigits(sim),
+                            ai: AiBadge(sim: sim),
+                            status: LineStatus(sim: sim, availability: availability),
+                            selected: selectedID == sim.id
+                        )
                         .frame(minHeight: 44)
-                        .background(selectedID == sim.id ? SIMPalette.color(for: sim, in: sims) : Color(uiColor: .secondarySystemBackground), in: Capsule())
+                        .contentShape(Capsule())
                         .overlay(alignment: .topTrailing) {
-                            if let text = BadgeLabelPolicy.text(badges[sim.id] ?? 0) { UnreadBadge(text: text).offset(x: 4, y: -6) }
+                            if let text = BadgeLabelPolicy.text(badges[sim.id] ?? 0) { UnreadBadge(text: text).offset(x: 4, y: -2) }
                         }
                     }
                     .buttonStyle(.plain)
@@ -60,11 +227,10 @@ struct SIMStrip: View {
                         + [BadgeLabelPolicy.accessibility(badges[sim.id] ?? 0)].compactMap { $0 }).joined(separator: "，"))
                     .accessibilityAddTraits(selectedID == sim.id ? .isSelected : [])
                 }
-            }.padding(.horizontal).padding(.top, 6)
+            }.padding(.horizontal)
         }
         .accessibilityIdentifier("sim.strip")
-        .scrollIndicators(.hidden).padding(.vertical, 8)
-        .background(.thinMaterial)
+        .scrollIndicators(.hidden).padding(.vertical, 4)
     }
 }
 
@@ -74,7 +240,7 @@ struct UnreadBadge: View {
     var body: some View {
         Text(text).font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(.white)
             .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18)
-            .background(Color(uiColor: .systemRed), in: Capsule())
+            .background(Signal.dangerFill, in: Capsule())
             .accessibilityHidden(true)
     }
 }
@@ -85,7 +251,7 @@ struct UnreadDot: View {
     /// Spoken first when the row combines its children; rows with an explicit label pass nil and prefix it themselves.
     var label: String?
     var body: some View {
-        Circle().fill(.tint).frame(width: 10, height: 10)
+        Circle().fill(Signal.brand).frame(width: 10, height: 10)
             .opacity(visible ? 1 : 0)
             .accessibilityLabel(label ?? "")
             .accessibilityHidden(!visible || label == nil)
@@ -127,10 +293,13 @@ struct SIMIdentityDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(sim.phoneLabel ?? "号码尚未核实").font(.subheadline)
-            Text("设备：\(simGatewayIdentity(sim, shortened: false))")
-                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            // S95b §C: the screen shows the gateway's name; the full id (S91: tells same-named gateways apart)
+            // stays in the spoken label.
+            Text("设备：\(simGatewayIdentity(sim, shortened: true))")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityLabel("设备：\(simGatewayIdentity(sim, shortened: false))")
             if sim.assignmentPending == true {
-                Label("号码分配正在同步", systemImage: "clock.arrow.circlepath").font(.caption).foregroundStyle(.orange)
+                Label("号码分配正在同步", systemImage: "clock.arrow.circlepath").font(.caption).foregroundStyle(Signal.warn)
             } else if sim.present == false {
                 Label("SIM 当前不在设备中", systemImage: "simcard.2.slash").font(.caption).foregroundStyle(.secondary)
             }
@@ -153,7 +322,7 @@ struct DialPad: View {
     ]
 
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: 3), spacing: 14) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: 3), spacing: 16) {
             ForEach(keys, id: \.0) { key, letters in
                 keypadKey(key, letters: letters)
             }
@@ -166,14 +335,15 @@ struct DialPad: View {
     @ViewBuilder private func keypadKey(_ key: String, letters: String) -> some View {
         let isZero = key == "0"
         VStack(spacing: 0) {
-            Text(key).font(.title2.weight(.medium)).monospacedDigit()
+            Text(key).font(.system(.title, design: .default).weight(.regular)).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.5)
             // A semantic style so the letters follow Dynamic Type instead of staying at a hardcoded 9 pt.
-            Text(letters).font(.caption2.weight(.medium)).tracking(1.2)
-                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(letters).font(.caption2.weight(.semibold)).tracking(1.6).foregroundStyle(Signal.ink2)
+                .lineLimit(1).minimumScaleFactor(0.5)
         }
-        .foregroundStyle(.primary)
-        .frame(width: 68, height: 68)
-        .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+        .foregroundStyle(Signal.ink)
+        .frame(width: 78, height: 78)
+        .background(Signal.surface2, in: Circle())
         .contentShape(Circle())
         .onTapGesture {
             guard !longPressed else { return }
@@ -213,9 +383,10 @@ struct InCallKeypad: View {
                     onKey(key)
                 } label: {
                     Text(key)
-                        .font(.title2.weight(.medium)).monospacedDigit().foregroundStyle(.primary)
-                        .frame(width: 58, height: 58)
-                        .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                        .font(.title2.weight(.medium)).monospacedDigit().foregroundStyle(Signal.ink)
+                        .lineLimit(1).minimumScaleFactor(0.5)
+                        .frame(width: 64, height: 64)
+                        .background(Signal.surface2, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(key)
@@ -238,7 +409,7 @@ struct SIMOccupancyBar: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "lock.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(Signal.warn)
                 .accessibilityHidden(true)
             Text(SIMOccupancyDisplayPolicy.summary(call, timeZone: timeZone, simLabel: simLabel))
                 .font(.footnote)
@@ -255,7 +426,7 @@ struct SIMOccupancyBar: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial)
+        .background(Signal.surface2)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(SIMOccupancyDisplayPolicy.summary(call, timeZone: timeZone, simLabel: simLabel))
         .confirmationDialog(
@@ -311,7 +482,7 @@ struct ErrorBanner: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        .background(Signal.surface, in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .contain)
         .reportsError(message, screen: screen, site: "banner")
     }
@@ -370,6 +541,7 @@ struct RecentCallTitle: View {
     let number: String?
     let contactName: String?
     var nameFont: Font = .body.weight(.medium)
+    var titleColor: Color = Signal.ink
 
     private var name: String {
         contactName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -382,11 +554,12 @@ struct RecentCallTitle: View {
     var body: some View {
         if name.isEmpty {
             // Accessibility sizes get a second line rather than "159…"; the default size stays one line.
-            Text(shownNumber).font(nameFont).monospacedDigit().lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            Text(shownNumber).font(nameFont).monospacedDigit().foregroundStyle(titleColor)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(nameFont).lineLimit(1)
-                Text(shownNumber).font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                Text(name).font(nameFont).foregroundStyle(titleColor).lineLimit(1)
+                Text(shownNumber).font(.subheadline).monospacedDigit().foregroundStyle(Signal.ink2)
             }
         }
     }
@@ -427,11 +600,6 @@ func simGatewayIdentity(_ sim: SIMChannel, shortened: Bool) -> String {
         return shortened ? name : "\(name) · \(short)"
     }
     return shortened ? short : "\(prefix)\(id)"
-}
-
-private func simCompactDetail(_ sim: SIMChannel) -> String {
-    if let phone = sim.phoneLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !phone.isEmpty { return phone }
-    return simGatewayIdentity(sim, shortened: true)
 }
 
 struct LoadStateView: View {

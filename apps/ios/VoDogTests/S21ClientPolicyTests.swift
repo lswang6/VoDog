@@ -771,10 +771,10 @@ final class S21ClientPolicyTests: XCTestCase {
             var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
             resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
             let scheme = style == .dark ? "dark" : "light"
-            XCTAssertGreaterThan(red, 0.8, "danger red channel in \(scheme)")
-            // The S20 dark value was the pink (255,179,191) the user complained about: g≈0.70, b≈0.75.
-            XCTAssertLessThan(green, 0.35, "danger green channel in \(scheme)")
-            XCTAssertLessThan(blue, 0.35, "danger blue channel in \(scheme)")
+            // The S20 dark value was the pink (255,179,191) the user complained about: g≈0.70, b≈0.75. S95 Signal
+            // danger (#C2302B / #FF7A73) is relative: green and blue stay at most half of red.
+            XCTAssertLessThanOrEqual(green, 0.5 * red, "danger green channel in \(scheme)")
+            XCTAssertLessThanOrEqual(blue, 0.5 * red, "danger blue channel in \(scheme)")
             XCTAssertGreaterThan(red - max(green, blue), 0.5, "danger must read as red, not rose, in \(scheme)")
         }
     }

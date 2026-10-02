@@ -303,12 +303,12 @@ internal fun blockedCallSourceLabel(call: JSONObject): String? =
         null
     }
 
-/** 失败原因 in 记录详情: only the S38 reason is translated, everything else stays verbatim. */
+/** 失败原因 in 记录详情: known reasons in Chinese; unknown raw enums are hidden (S95b §C). */
 internal fun failureReasonLabel(reason: String?): String? = when {
     reason.isNullOrBlank() || reason == "null" -> null
     reason == "busy_auto_rejected" -> "忙线未接"
     reason == "number_blocked" -> "号码已拦截"
-    else -> reason
+    else -> null
 }
 
 /** 拦截来源 (S38): 手机 = the Pixel's own screening app, ahead of the gateway. */

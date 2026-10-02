@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
+import React, {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {useReportedError} from './ui-error';
 import {serverRecordingLabel,parseRecording,recordingAttachmentFilename,recordingUrl,verifyPixelTrackHeaders,type DerivedTrackDescriptor,type UplinkTrackDescriptor,type RecordingDescriptor,type RecordingSource,type RecordingTrack,type TrackDescriptor} from './recording-contract';
 import {audioOwnership} from './audio-ownership';
@@ -17,8 +17,9 @@ const recordingPlayers=new Set<()=>void>();
 function registerRecordingPlayer(pause:()=>void,dispose:()=>void){recordingPlayers.add(pause);const unregister=audioOwnership.registerPlayer(dispose);return()=>{recordingPlayers.delete(pause);unregister();};}
 function claimRecordingPlayer(owner:()=>void){for(const stop of [...recordingPlayers])if(stop!==owner)stop();}
 /** `preferPixelSource`：S38 手机直拨的通话没有 media_node 那一路，录音只在 Pixel 归档里，默认就打开它。 */
-export function CallRecording({callId,timeZone,request,preferPixelSource=false,ownerJoinedLocal=false,gatewayKind}:{callId:string;timeZone?:string;request?:ApiRequest;preferPixelSource?:boolean;ownerJoinedLocal?:boolean;gatewayKind?:string|null}){
- const [opened,setOpened]=useState(false),[source,setSource]=useState<RecordingSource>(preferPixelSource?'pixel':'media_node');
+export function CallRecording({callId,timeZone,request,preferPixelSource=false,ownerJoinedLocal=false,gatewayKind,initialOpen=false}:{callId:string;timeZone?:string;request?:ApiRequest;preferPixelSource?:boolean;ownerJoinedLocal?:boolean;gatewayKind?:string|null;/** 记录 detail pane: open on mount (still closes when a call starts). */initialOpen?:boolean}){
+ const callActiveNow=audioOwnership.isCallActive();
+ const [opened,setOpened]=useState(()=>initialOpen&&!callActiveNow),[source,setSource]=useState<RecordingSource>(preferPixelSource?'pixel':'media_node');
  const [missingNotice,setMissingNotice]=useState('');
  const callActive=useSyncExternalStore(audioOwnership.subscribe,audioOwnership.isCallActive);
  const zone=gatewayDisplayTimeZone(timeZone);
@@ -58,7 +59,7 @@ function RecordingDetail({callId,source,timeZone,gatewayKind}:{callId:string;sou
  {recording.captureComplete===false&&<p className="note">录制过程中有缺失，回放可能出现缺音。</p>}
   {playbackPairs(recording,source).map(pair=><CombinedRecordingAudio key={pair.label} callId={callId} source={source} tracks={pair.tracks} label={pair.label} description={pair.description}/>)}
   <details className="original-tracks"><summary>分别播放原声</summary>{[...recording.tracks,...recording.uplinkTracks].filter(track=>track.bytes>(source==='pixel'?44:0)).map(track=><RecordingAudio key={`${track.id}:${track.sha256}`} callId={callId} source={source} track={track}/>)}</details>
-  {recording.derivedTracks.length>0&&<details className="derived-tracks"><summary>播放通话声音（含补偿）</summary><p className="note">这是独立的播放轨，可能含 PLC/FEC 补偿；它不会覆盖原声缺口或改变原声完整性。</p>{recording.derivedTracks.filter(track=>track.bytes>44).map(track=><RecordingAudio key={`${track.id}:${track.sha256}`} callId={callId} source={source} track={track}/>)}</details>}
+  {recording.derivedTracks.length>0&&<details className="derived-tracks"><summary>播放通话声音（含补偿）</summary><p className="note">这是补偿丢包后的播放声，只用于收听；原声保持不变。</p>{recording.derivedTracks.filter(track=>track.bytes>44).map(track=><RecordingAudio key={`${track.id}:${track.sha256}`} callId={callId} source={source} track={track}/>)}</details>}
  </div>;
 }
 export function CombinedRecordingAudio({callId,source,tracks,label,description}:{callId:string;source:RecordingSource;tracks:readonly [PairTrackDescriptor,PairTrackDescriptor];label:string;description:string}){
@@ -83,6 +84,7 @@ function RecordingPairAudio({callId,source,tracks,label,description}:{callId:str
  const primary=useRef<HTMLAudioElement>(null),secondary=useRef<HTMLAudioElement>(null),controller=useRef<RecordingPairController|null>(null),pauseRef=useRef<()=>void>(()=>{}),disposeRef=useRef<()=>void>(()=>{});
  const contractDuration=pairContractDurationSeconds(tracks);
  const [state,setState]=useState<PairState>({playing:false,buffering:false,currentTime:0,duration:contractDuration,error:''});
+ const [rate,setRate]=useState(1),[peaks,setPeaks]=useState<number[]|null>(null);
  useReportedError('recording','pair.play',state.error);
  useEffect(()=>{
   if(!primary.current||!secondary.current)return;const elements=[primary.current,secondary.current] as const,pair=new RecordingPairController(elements,setState,contractDuration);controller.current=pair;let released=false;
@@ -90,16 +92,36 @@ function RecordingPairAudio({callId,source,tracks,label,description}:{callId:str
   const dispose=()=>{if(released)return;released=true;pair.dispose();for(const audio of elements){audio.removeAttribute('src');audio.load();}};
   pauseRef.current=pause;disposeRef.current=dispose;const unregister=registerRecordingPlayer(pause,dispose);return()=>{unregister();dispose();};
  },[]);
+ const progress=state.duration?Math.min(1,state.currentTime/state.duration):0;
  return <div className="recording-track combined-recording"><strong>{label}</strong><p className="note">{description}</p>
-  <div className="recording-pair-controls"><button className="passkey" onClick={()=>{if(audioOwnership.isCallActive()){disposeRef.current();return;}claimRecordingPlayer(pauseRef.current);(state.playing||state.buffering)?controller.current?.pause():controller.current?.play();}}>{state.playing||state.buffering?'暂停':'播放'}</button>
-   <input type="range" min="0" max={state.duration||0} step="0.1" value={Math.min(state.currentTime,state.duration||0)} disabled={!state.duration} aria-label="双向播放进度" onChange={event=>controller.current?.seek(Number(event.target.value))}/>
-   <span className="note recording-duration">{formatTime(state.currentTime)} / {formatTime(state.duration)}</span>
-   <RecordingDownloadButton callId={callId} source={source} track="conversation" label="下载对话 MP3" note="双方声音时间对齐后合成的一个文件"/></div>
-  {state.buffering&&<p role="status">两条声轨正在缓冲，准备好后将继续播放…</p>}
+  <div className="recording-pair-controls"><button className={'passkey play-toggle'+(state.playing||state.buffering?' playing':'')} onClick={()=>{if(audioOwnership.isCallActive()){disposeRef.current();return;}claimRecordingPlayer(pauseRef.current);(state.playing||state.buffering)?controller.current?.pause():controller.current?.play();}}>{state.playing||state.buffering?'暂停':'播放'}</button>
+   <div className={'recording-progress'+(peaks?' has-waveform':'')} style={{'--played':`${progress*100}%`} as React.CSSProperties}>
+    {peaks&&<div className="recording-waveform" aria-hidden="true">{peaks.map((peak,index)=><span key={index} className={index/peaks.length<progress?'played':''} style={{height:`${Math.max(8,peak*100)}%`}}/>)}</div>}
+    <input type="range" min="0" max={state.duration||0} step="0.1" value={Math.min(state.currentTime,state.duration||0)} disabled={!state.duration} aria-label="双向播放进度" onChange={event=>controller.current?.seek(Number(event.target.value))}/>
+   </div>
+   <span className="note recording-duration num">{formatTime(state.currentTime)} / {formatTime(state.duration)}</span>
+   <button type="button" className="passkey recording-rate num" aria-label={`播放速度 ${rate} 倍`} onClick={()=>{const next=RATES[(RATES.indexOf(rate)+1)%RATES.length]!;setRate(next);for(const audio of [primary.current,secondary.current])if(audio){audio.defaultPlaybackRate=next;audio.playbackRate=next;}}}>{rate}×</button>
+   <RecordingDownloadButton callId={callId} source={source} track="conversation" label="下载对话 MP3" note="双方声音时间对齐后合成的一个文件" onBlob={blob=>void decodePeaks(blob).then(value=>{if(value)setPeaks(value);})}/></div>
   <audio ref={primary} hidden preload="metadata" aria-hidden="true" src={recordingUrl(callId,source,tracks[0].id)}/>
   <audio ref={secondary} hidden preload="metadata" aria-hidden="true" src={recordingUrl(callId,source,tracks[1].id)}/>
   {state.error&&<p role="alert">{state.error}</p>}
  </div>;
+}
+const RATES=[1,1.5,2];
+/**
+ * S95 waveform: peak amplitude per bucket of audio the user already downloaded (下载对话 MP3). The streamed
+ * `<audio>` never exposes its bytes, so until then the player shows a plain progress bar — never a made-up wave.
+ */
+export async function decodePeaks(blob:Blob,count=72):Promise<number[]|null>{
+ const Context=globalThis.OfflineAudioContext;
+ if(!Context)return null;
+ try{
+  const audio=await new Context(1,1,44100).decodeAudioData(await blob.arrayBuffer());
+  const data=audio.getChannelData(0),size=Math.max(1,Math.floor(data.length/count)),peaks:number[]=[];
+  for(let bucket=0;bucket<count;bucket++){let peak=0;for(let i=bucket*size;i<Math.min(data.length,(bucket+1)*size);i++)peak=Math.max(peak,Math.abs(data[i]!));peaks.push(peak);}
+  const max=Math.max(...peaks);
+  return max>0?peaks.map(peak=>peak/max):null;
+ }catch{return null;}
 }
 function formatTime(seconds:number){if(!Number.isFinite(seconds)||seconds<0)return '0:00';const whole=Math.floor(seconds);return `${Math.floor(whole/60)}:${String(whole%60).padStart(2,'0')}`;}
 function RecordingAudio({callId,source,track}:{callId:string;source:RecordingSource;track:TrackDescriptor|DerivedTrackDescriptor|UplinkTrackDescriptor}){
@@ -121,15 +143,15 @@ function RecordingAudio({callId,source,track}:{callId:string;source:RecordingSou
  },[url,source,track]);
  useEffect(()=>{const audio=ref.current;return()=>{if(audio){audio.pause();audio.removeAttribute('src');audio.load();}};},[]);
  return <div className="recording-track"><div className="recording-track-heading"><strong>{name}</strong>{knownDuration!==undefined&&<span className="note recording-duration">{formatTime(knownDuration)}</span>}<RecordingDownloadButton callId={callId} source={source} track={track.id} label="下载"/></div>
-  {track.sourceRole!=='derived_playout'&&track.captureComplete===false&&<p className="note">此声轨录制不完整 · 缺口 {track.gapCount} · 丢帧 {track.droppedFrames}</p>}
-  {track.sourceRole==='derived_playout'&&<p className="note">派生播放轨 · 补偿帧 {track.recoveryFrames} · 缺口 {track.gapCount}{track.playoutComplete?'':' · 播放轨不完整'}</p>}
+  {track.sourceRole!=='derived_playout'&&track.captureComplete===false&&<p className="note">此声轨录制不完整，可能有短暂缺音</p>}
+  {track.sourceRole==='derived_playout'&&<p className="note">补偿播放声{track.gapCount?` · ${track.gapCount} 处缺口`:''}{track.playoutComplete?'':' · 播放轨不完整'}</p>}
   {!ready&&!error&&<p role="status">正在校验声轨…</p>}
   <audio ref={ref} hidden={!ready||Boolean(error)} controls preload="metadata" aria-label={name} src={ready&&!error?url:undefined} onPlay={()=>{if(audioOwnership.isCallActive())disposeRef.current();else claimRecordingPlayer(pauseRef.current);}} onError={()=>setError('音频暂时无法播放，请重新打开录音或重新登录。')}/>
   {error&&<p role="alert">{error}</p>}
  </div>;
 }
 /** S36 C4: 每个按钮只存一个文件——单声轨或 `conversation` 合成轨，都是 mp3。 */
-function RecordingDownloadButton({callId,source,track,label,note}:{callId:string;source:RecordingSource;track:RecordingTrack;label:string;note?:string}){
+function RecordingDownloadButton({callId,source,track,label,note,onBlob}:{callId:string;source:RecordingSource;track:RecordingTrack;label:string;note?:string;/** The saved file, for a waveform drawn from real audio. */onBlob?:(blob:Blob)=>void}){
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  useReportedError('recording','download',error);
  async function save(){
@@ -145,6 +167,7 @@ function RecordingDownloadButton({callId,source,track,label,note}:{callId:string
     const blob=await response.blob();
     return {blob,filename:recordingAttachmentFilename(callId,source,track,response.headers.get('Content-Disposition'),'mp3')};
    },DOWNLOAD_TIMEOUT_MS);
+   onBlob?.(blob);
    objectUrl=URL.createObjectURL(blob);
    const link=document.createElement('a');
    link.href=objectUrl;

@@ -12,6 +12,8 @@ import {isOpenableUrl,smsLinkSegments} from './sms-links';
 import {CONVERSATION_DELETE_AND_BLOCK_PROMPT,CONVERSATION_DELETE_PROMPT,MESSAGES_DELETE_CONFIRM_LABEL,MESSAGES_DELETE_PROMPT} from './confirm-copy';
 import {threadHasUnread} from './badges';
 import {diag} from './diag';
+import {verificationCode} from './sms-code';
+import {UiIcon} from './icons';
 import {formatCompactCallDate,formatCompactThreadDate,gatewayDisplayTimeZone} from './gateway-time';
 /**
  * `onDeleteMessages`/`onDeleteThread` answer `true` only when the server actually accepted (S30 §2): a failed
@@ -20,9 +22,13 @@ import {formatCompactCallDate,formatCompactThreadDate,gatewayDisplayTimeZone} fr
 type RecipientProps={request?:ApiRequest;account?:string;onSent?:(items:ThreadMessage[])=>void|Promise<void>};
 type Props=RecipientProps&{messages:ThreadMessage[];simId:string;simLabel:string;online:boolean;busy:boolean;timeZone?:string|null;composeTo?:{simId:string;remoteNumber:string;token:number}|null;onComposeConsumed?:()=>void;onSend:(number:string,body:string)=>Promise<void>;onDeleteMessages?:(ids:string[])=>Promise<SmsDeleteResult|boolean|null>;onDeleteThread?:(thread:MessageThread,block:boolean)=>Promise<ThreadDeleteResult|boolean|null>;
  /** S67: ids of incoming messages in the open conversation, each sent once per mount; the server ignores already-read ids. */
- onReadIncoming?:(ids:string[])=>void};
+ onReadIncoming?:(ids:string[])=>void;
+ /** Presentation only: line chip for 「从 … 发送」 and header shortcuts into the existing call/contact flows. */
+ fromChip?:React.ReactNode;onCall?:(number:string)=>void;onOpenContact?:(number:string,contactName:string|null)=>void};
 export function Messages(props:Props){return <MessagesBody key={props.account||'session'} {...props}/>;}
-function MessagesBody({request,account,onSent,messages,simId,simLabel,online,busy,timeZone,composeTo=null,onComposeConsumed,onSend,onDeleteMessages,onDeleteThread,onReadIncoming}:Props){
+function MessagesBody({request,account,onSent,messages,simId,simLabel,online,busy,timeZone,composeTo=null,onComposeConsumed,onSend,onDeleteMessages,onDeleteThread,onReadIncoming,fromChip,onCall,onOpenContact}:Props){
+ const [query,setQuery]=useState('');const [copied,setCopied]=useState<string|null>(null);
+ function copyCode(code:string){void navigator.clipboard?.writeText(code).then(()=>{setCopied(code);setTimeout(()=>setCopied(c=>c===code?null:c),2000);},()=>{});}
  const zone=gatewayDisplayTimeZone(timeZone);
  const [recipients,setRecipients]=useState<SmsRecipient[]>([]);
  const [pendingRecipient,setPendingRecipient]=useState(false);
@@ -87,11 +93,12 @@ function MessagesBody({request,account,onSent,messages,simId,simLabel,online,bus
   void onDeleteThread(thread,shouldBlock).then(result=>{setConfirming(null);if(!result)return;if(result===true){setBlockedThreadKey(null);leaveSelection();setThreadKey(null);return;}if(result.blocked&&!result.ok){setBlockedThreadKey(thread.key);{const notice=result.error||'号码已屏蔽，但对话删除失败，请重试';setDeleteNotice(notice);diag.uiError('短信','sms.thread.delete',notice);}return;}if(result.ok&&result.skipped.length){if(result.blocked)setBlockedThreadKey(thread.key);setDeleteNotice(`仍有 ${result.skipped.length} 条短信正在发送，已保留供重试。`);return;}if(result.ok){setBlockedThreadKey(null);leaveSelection();setThreadKey(null);}});
  }
  return <section className={'messages-app '+(active?'has-conversation':'')} aria-label="短信会话">
-  <div className="thread-list"><div className="messages-heading"><h2>信息</h2><button aria-label="新短信" disabled={!simId||busy} onClick={()=>{setComposing(true);setThreadKey(null);setRecipients([]);setPendingRecipient(false);setComposeRevision(value=>value+1);setSendNotice('');}}>＋ 新短信</button></div>
-   {threads.length===0?<div className="empty"><h3>暂无短信</h3><p>选择号码后，开始一段对话。</p></div>:threads.map(t=>{const last=t.messages.at(-1)!;const unread=!(!composing&&selected?.key===t.key)&&threadHasUnread(t.messages,readSent.current);return <button className={'thread-row '+(!composing&&selected?.key===t.key?'active':'')} key={t.key} onClick={()=>{setThreadKey(t.key);setComposing(false);}} aria-current={!composing&&selected?.key===t.key?'true':undefined}><span className="unread-dot thread-unread-dot" data-on={unread||undefined}>{unread&&<span className="sr-only">未读</span>}</span><span className="contact-avatar" aria-hidden="true">{t.contactName?t.contactName.slice(0,1):t.number?t.number.slice(-2):'?'}</span><span className="thread-preview"><strong>{numberWithContact(t.number,t.contactName)}</strong><span>{last.body}</span><small>{smsStatusLabel(last)}</small></span><time dateTime={last.createdAt}>{formatCompactThreadDate(last.createdAt,zone)}</time></button>})}
+  <div className="thread-list"><div className="messages-heading"><h2>信息</h2><button aria-label="新短信" disabled={!simId||busy} onClick={()=>{setComposing(true);setThreadKey(null);setRecipients([]);setPendingRecipient(false);setComposeRevision(value=>value+1);setSendNotice('');}}><UiIcon name="compose" size={18}/>新短信</button></div>
+   <label className="thread-search"><UiIcon name="search" size={18}/><span className="sr-only">搜索短信</span><input type="search" placeholder="搜索会话、号码或内容" value={query} onChange={e=>setQuery(e.target.value)}/></label>
+   {threads.length===0?<div className="empty"><h3>暂无短信</h3><p>选择号码后，开始一段对话。</p></div>:threads.filter(t=>{const q=query.trim().toLowerCase();return !q||[t.number,t.contactName,...t.messages.map(m=>m.body)].some(v=>v?.toLowerCase().includes(q));}).map(t=>{const last=t.messages.at(-1)!;const code=verificationCode(last.body);const unread=!(!composing&&selected?.key===t.key)&&threadHasUnread(t.messages,readSent.current);return <div className="thread-item" key={t.key}><button className={'thread-row '+(!composing&&selected?.key===t.key?'active':'')} onClick={()=>{setThreadKey(t.key);setComposing(false);}} aria-current={!composing&&selected?.key===t.key?'true':undefined}><span className="unread-dot thread-unread-dot" data-on={unread||undefined}>{unread&&<span className="sr-only">未读</span>}</span><span className="contact-avatar" aria-hidden="true">{t.contactName?t.contactName.slice(0,1):t.number?t.number.slice(-2):'?'}</span><span className="thread-preview"><strong>{numberWithContact(t.number,t.contactName)}</strong><span>{last.body}</span><small>{smsStatusLabel(last)}</small></span><time dateTime={last.createdAt}>{formatCompactThreadDate(last.createdAt,zone)}</time></button>{code&&<button type="button" className="code-copy" onClick={()=>copyCode(code)}><UiIcon name="copy" size={16}/>{copied===code?'已复制':'复制验证码'} <span className="num">{code}</span></button>}</div>})}
   </div>
   <div className="conversation">{!active?<div className="empty"><h3>选择一段对话</h3><p>使用 {simLabel} 接收和发送短信。</p></div>:<>
-   <header className="conversation-heading"><button className="conversation-back" aria-label="返回短信列表" onClick={()=>{setComposing(false);setThreadKey(null);}}>‹ 信息</button><div><h2>{composing?'新短信':numberWithContact(selected?.number,selected?.contactName)}</h2><small>使用 {simLabel}</small></div></header>
+   <header className="conversation-heading"><button className="conversation-back" aria-label="返回短信列表" onClick={()=>{setComposing(false);setThreadKey(null);}}>‹ 信息</button><div><h2>{composing?'新短信':numberWithContact(selected?.number,selected?.contactName)}</h2><small dir="ltr">{!composing&&selected?.contactName?selected.number:`使用 ${simLabel}`}</small></div>{!composing&&selected?.number&&<div className="conversation-tools">{onCall&&<button type="button" className="icon-button call" aria-label={`拨打 ${selected.number}`} onClick={()=>onCall(selected.number)}><UiIcon name="phone" size={18}/></button>}{onOpenContact&&<button type="button" className="icon-button" aria-label="联系人信息" onClick={()=>onOpenContact(selected.number,selected.contactName)}><UiIcon name="contacts" size={18}/></button>}</div>}</header>
    {showActions&&<div className="conversation-actions">
     <div className="conversation-action-row">
      {selecting
@@ -123,7 +130,7 @@ function MessagesBody({request,account,onSent,messages,simId,simLabel,online,bus
     const chosen=selectedIds.has(m.id);
     // In selection mode the whole bubble is the hit target; the box only mirrors it, so one tap never toggles twice.
     const selectable=selecting?{role:'checkbox','aria-checked':chosen,tabIndex:0,onClick:()=>toggleMessage(m.id),onKeyDown:(event:React.KeyboardEvent)=>{if(event.key===' '||event.key==='Enter'){event.preventDefault();toggleMessage(m.id);}}}:{};
-    return <article className={'message-bubble '+(m.direction==='outgoing'?'outgoing':'incoming')+(chosen&&selecting?' selected':'')} key={m.id} {...selectable}>{selecting&&<input type="checkbox" className="message-select" checked={chosen} readOnly tabIndex={-1} aria-hidden="true"/>}<SmsBody body={m.body} plain={selecting}/><small>{formatCompactCallDate(m.createdAt,zone)} · {smsStatusLabel(m)}</small></article>;
+    return <article className={'message-bubble '+(m.direction==='outgoing'?'outgoing':'incoming')+(chosen&&selecting?' selected':'')} key={m.id} {...selectable}>{selecting&&<input type="checkbox" className="message-select" checked={chosen} readOnly tabIndex={-1} aria-hidden="true"/>}<SmsBody body={m.body} plain={selecting}/>{!selecting&&(code=>code&&<button type="button" className="code-copy" onClick={()=>copyCode(code)}><UiIcon name="copy" size={16}/>{copied===code?'已复制':'复制验证码'} <span className="num">{code}</span></button>)(verificationCode(m.body))}<small>{formatCompactCallDate(m.createdAt,zone)} · {smsStatusLabel(m)}</small></article>;
    })}<div ref={bottom}/></div>
    <form className="message-composer" onSubmit={e=>{
     e.preventDefault();
@@ -143,7 +150,7 @@ function MessagesBody({request,account,onSent,messages,simId,simLabel,online,bus
     }).catch(error=>{if(epoch===context.current&&activeDraft.current===draftKey){{const notice=error instanceof Error?error.message:'发送失败，草稿已保留';setSendNotice(notice);diag.uiError('短信','sms.send',notice);}setFocusFailedDraft(draftKey);}})
       .finally(()=>{submitting.current=false;if(mounted.current)setSending(false);});
    }}>
-    <textarea ref={composer} name="message" autoComplete="off" aria-label="短信内容" placeholder="短信…" rows={1} value={draft.body} onChange={e=>update({body:e.target.value})} disabled={busy}/><button className="send-message" aria-label={composing&&recipients.length>1?`发送短信到 ${recipients.length} 个号码`:'发送短信'} disabled={busy||!online||(composing?(pendingRecipient||!recipients.length||recipients.length>100):!draft.number.trim())||!draft.body.trim()||!canReply}>↑</button>
+    <p className="composer-from">从 {fromChip??<strong>{simLabel}</strong>} 发送 · 草稿自动保存</p><textarea ref={composer} name="message" autoComplete="off" aria-label="短信内容" placeholder="输入短信" rows={1} value={draft.body} onChange={e=>update({body:e.target.value})} disabled={busy}/><button className="send-message" aria-label={composing&&recipients.length>1?`发送短信到 ${recipients.length} 个号码`:'发送短信'} disabled={busy||!online||(composing?(pendingRecipient||!recipients.length||recipients.length>100):!draft.number.trim())||!draft.body.trim()||!canReply}><UiIcon name="send" size={20}/></button>
    </form>{!canReply&&<p className="note">此发送方不支持直接回复。</p>}{!online&&<p className="note">此号码暂不可用，草稿已保留。</p>}
   </>}</div>
  </section>;

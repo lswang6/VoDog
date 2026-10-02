@@ -11,7 +11,8 @@ import java.time.format.DateTimeFormatter
  * caller) it is exactly what it always was.
  */
 internal fun callTitle(item: JSONObject): String = numberWithContactName(
-    item.optString("remoteNumber", item.optString("id", "通话")),
+    // S95b §C: never fall back to the call's internal id; numberWithContactName says 号码未知.
+    item.optString("remoteNumber"),
     item.nullableContactName(),
 )
 
@@ -40,7 +41,7 @@ internal fun contactNameWithNumber(number: String, contactName: String?): String
 internal fun callRowLines(item: JSONObject): Pair<String?, String> {
     // S72 E: 内部通话的第一行是「内部通话 A → B」，号码行照旧。
     val internalTitle = org.vodog.internalCallTitle(item)
-    val shown = item.optString("remoteNumber", item.optString("id", "通话"))
+    val shown = item.optString("remoteNumber")
         .takeIf { it.isNotBlank() && it != "null" } ?: "号码未知"
     internalTitle?.let { return it to shown }
     return item.nullableContactName()?.trim()?.takeIf { it.isNotEmpty() && it != shown } to shown
@@ -190,11 +191,42 @@ internal fun modeDisplayLabel(mode: String): String = when (mode) {
     else -> "模式待确认"
 }
 
-/** S57：SIM 选择条的接听方式标记；没有 settings（或未知模式）时不显示。 */
-internal fun simAnswerModeBadge(mode: String?): String? = when (mode) {
-    "normal" -> "人工"
-    "ai", "timeout_ai" -> "AI"
+/**
+ * S95b §A AiBadge text: compact `AI` in chips; full `AI 代接` / `AI · N 秒后` (`AI 兜底` without N) in
+ * settings rows. `normal`, unknown or missing mode → null (no badge).
+ */
+internal fun aiBadgeText(mode: String?, timeoutSeconds: Int? = null, compact: Boolean = true): String? = when {
+    mode != "ai" && mode != "timeout_ai" -> null
+    compact -> "AI"
+    mode == "ai" -> "AI 代接"
+    timeoutSeconds != null -> "AI · $timeoutSeconds 秒后"
+    else -> "AI 兜底"
+}
+
+/** One TalkBack label for the whole badge (§A); null when there is no badge. */
+internal fun aiBadgeAccessibilityLabel(mode: String?, timeoutSeconds: Int? = null): String? = when (mode) {
+    "ai" -> "AI 代接已开启，立即由 AI 接听"
+    "timeout_ai" -> timeoutSeconds?.let { "AI 代接已开启，响铃 $it 秒无人接听后由 AI 接听" } ?: "AI 代接已开启，无人接听时由 AI 接听"
     else -> null
+}
+
+/**
+ * S95b §C: the transcript status line. Never prints provider/model ids, error codes or the raw
+ * server error text; null once the transcript succeeded (the result is shown instead).
+ */
+internal fun transcriptStatusText(transcript: CallTranscript): String? = when (transcript.status) {
+    "succeeded" -> null
+    "queued" -> "转写已排队"
+    "running" -> "正在转写（第 ${transcript.attempts} 次处理）"
+    "retry" -> "转写等待重试" + transcript.nextAttemptAt?.takeIf { it.isNotBlank() && it != "null" }?.let { " · ${displayDateTime(it)}" }.orEmpty()
+    "failed" -> "转写失败"
+    else -> "暂时无法识别转写状态"
+}
+
+/** Device a SIM sits in, for user screens: the gateway's name, else its kind — never `PX-…` ids (§C). */
+internal fun simDeviceLabel(sim: ClientSim): String = when {
+    sim.gatewayId.isNullOrBlank() -> "设备待确认"
+    else -> sim.gatewayName?.trim()?.takeIf(String::isNotEmpty) ?: sim.gatewayKind.deviceName
 }
 
 /**
@@ -307,3 +339,67 @@ private val clientDateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPat
 internal fun displayDateTime(value: String): String = value.takeUnless { it.isBlank() || it == "null" }
     ?.let { raw -> runCatching { Instant.parse(raw).atZone(ZoneId.systemDefault()).format(clientDateTimeFormatter) }.getOrNull() }
     ?: "时间待确认"
+
+private val verificationKeyword = Regex("验证码|校验码|动态码|确认码|code|otp", RegexOption.IGNORE_CASE)
+private val verificationDigits = Regex("(?<![0-9])[0-9]{4,8}(?![0-9])")
+
+/**
+ * S95: client-side verification-code detection for the 「复制」 button (display + copy only). Needs a
+ * keyword; prefers the first 4–8 digit run after it, else the first one anywhere.
+ */
+internal fun smsVerificationCode(body: String): String? {
+    val keyword = verificationKeyword.find(body) ?: return null
+    return (verificationDigits.find(body, keyword.range.last + 1) ?: verificationDigits.find(body))?.value
+}
+
+/** S95 list time: `HH:mm` today, `M月d日` this year, otherwise the full [displayDateTime]. */
+internal fun compactListTime(value: String, zone: ZoneId = ZoneId.systemDefault(), now: Instant = Instant.now()): String {
+    val at = value.takeUnless { it.isBlank() || it == "null" }?.let { runCatching { Instant.parse(it).atZone(zone) }.getOrNull() }
+        ?: return displayDateTime(value)
+    val today = now.atZone(zone).toLocalDate()
+    return when {
+        at.toLocalDate() == today -> at.format(DateTimeFormatter.ofPattern("HH:mm"))
+        at.year == today.year -> at.format(DateTimeFormatter.ofPattern("M月d日"))
+        else -> displayDateTime(value)
+    }
+}
+
+/**
+ * S95b 记录 list section header for a call's start: 今天 / 昨天 / 周X (this week) / M月d日 / yyyy年M月d日.
+ * ponytail: device time zone, like [compactListTime]; the detail page still shows gateway-local time.
+ */
+internal fun callDaySectionLabel(value: String, zone: ZoneId = ZoneId.systemDefault(), now: Instant = Instant.now()): String {
+    val day = value.takeUnless { it.isBlank() || it == "null" }
+        ?.let { runCatching { Instant.parse(it).atZone(zone).toLocalDate() }.getOrNull() } ?: return "时间待确认"
+    val today = now.atZone(zone).toLocalDate()
+    val daysAgo = java.time.temporal.ChronoUnit.DAYS.between(day, today)
+    return when {
+        daysAgo == 0L -> "今天"
+        daysAgo == 1L -> "昨天"
+        daysAgo in 2..6 -> "周" + "一二三四五六日"[day.dayOfWeek.value - 1]
+        day.year == today.year -> day.format(DateTimeFormatter.ofPattern("M月d日"))
+        else -> day.format(DateTimeFormatter.ofPattern("yyyy年M月d日"))
+    }
+}
+
+/** HH:mm under a [callDaySectionLabel] header; empty when the time is unknown. */
+internal fun callRowTime(value: String, zone: ZoneId = ZoneId.systemDefault()): String =
+    value.takeUnless { it.isBlank() || it == "null" }
+        ?.let { runCatching { Instant.parse(it).atZone(zone).format(DateTimeFormatter.ofPattern("HH:mm")) }.getOrNull() }
+        .orEmpty()
+
+/** S95b 电话 tab row time (no section headers): HH:mm / 昨天 / 周X / M/D / yyyy/M/D, like Web and iOS. */
+internal fun callRelativeTime(value: String, zone: ZoneId = ZoneId.systemDefault(), now: Instant = Instant.now()): String {
+    val at = value.takeUnless { it.isBlank() || it == "null" }
+        ?.let { runCatching { Instant.parse(it).atZone(zone) }.getOrNull() } ?: return ""
+    val today = now.atZone(zone).toLocalDate()
+    val day = at.toLocalDate()
+    val daysAgo = java.time.temporal.ChronoUnit.DAYS.between(day, today)
+    return when {
+        daysAgo <= 0L -> at.format(DateTimeFormatter.ofPattern("HH:mm"))
+        daysAgo == 1L -> "昨天"
+        daysAgo in 2..6 -> "周" + "一二三四五六日"[day.dayOfWeek.value - 1]
+        day.year == today.year -> "${day.monthValue}/${day.dayOfMonth}"
+        else -> "${day.year}/${day.monthValue}/${day.dayOfMonth}"
+    }
+}

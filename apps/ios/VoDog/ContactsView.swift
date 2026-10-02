@@ -18,6 +18,7 @@ struct ContactsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
                 Section {
                     Button {
@@ -66,7 +67,10 @@ struct ContactsView: View {
                             .reportsError(error, screen: "contacts", site: "list")
                     }
                 }
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .navigationTitle("通讯录")
             .toolbarTitleDisplayMode(.inlineLarge)
             .searchable(text: Binding(get: { query }, set: { if availability.canMutate { query = $0 } }), prompt: "搜索姓名或号码")
@@ -155,28 +159,36 @@ struct ContactDetailView: View {
 
     var body: some View {
         List {
+            Group {
+            // S95 header: centered avatar, name, organization; no card behind it.
             Section {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(contact.displayName.isEmpty ? "未命名联系人" : contact.displayName)
-                        .font(.title3.weight(.semibold))
+                VStack(spacing: 6) {
+                    let name = contact.displayName.isEmpty ? "未命名联系人" : contact.displayName
+                    Text(String(name.prefix(1)))
+                        .font(.system(size: 40, weight: .semibold)).foregroundStyle(Signal.ink2)
+                        .frame(width: 92, height: 92).background(Signal.surface3, in: Circle())
+                        .accessibilityHidden(true)
+                    Text(name).font(.title2.weight(.bold)).foregroundStyle(Signal.ink)
+                        .multilineTextAlignment(.center).padding(.top, 6)
                     if let organization = contact.organization, !organization.isEmpty {
-                        Text(organization).font(.subheadline).foregroundStyle(.secondary)
+                        Text(organization).font(.subheadline).foregroundStyle(Signal.ink2)
                     }
                     if contact.isBlocked {
                         Label("已屏蔽", systemImage: "hand.raised.slash.fill")
-                            .font(.footnote.weight(.medium)).foregroundStyle(Color.callerDanger)
+                            .font(.footnote.weight(.medium)).foregroundStyle(Signal.danger)
                     }
                 }
-                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity)
                 .accessibilityElement(children: .combine)
+                ContactActionRow(number: primaryNumber, simID: nil, navigation: navigation, dismiss: { dismiss() }) { card = ContactCardTarget(contact: contact) }
             }
-            Section { ContactActionRow(number: primaryNumber, simID: nil, navigation: navigation, dismiss: { dismiss() }) { card = ContactCardTarget(contact: contact) } }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
             if !contact.phones.isEmpty {
-                Section("电话") {
+                Section("号码") {
                     ForEach(contact.phones) { phone in
-                        LabeledContent(ContactLabelDisplay.text(phone.label, fallback: "电话")) {
-                            Text(phone.displayNumber).monospacedDigit().textSelection(.enabled)
-                        }
+                        ContactNumberRow(label: ContactLabelDisplay.text(phone.label, fallback: "电话"),
+                                         number: phone.displayNumber, navigation: navigation) { dismiss() }
                     }
                 }
             }
@@ -200,6 +212,7 @@ struct ContactDetailView: View {
             if let notes = contact.notes, !notes.isEmpty {
                 Section("备注") { Text(notes).textSelection(.enabled) }
             }
+            // S95 / S46: destructive actions sit alone at the bottom.
             Section {
                 Button("删除联系人", role: .destructive) {
                     pendingDeleteVersion = contact.version
@@ -216,7 +229,10 @@ struct ContactDetailView: View {
                         .reportsError(error, screen: "contact_detail", site: "detail")
                 }
             }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .navigationTitle("联系人")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -350,43 +366,96 @@ struct ContactActionRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Button {
                 guard availability.canDial(on: simID ?? SIMSelectionPolicy.preferredID(in: availability.sims, current: nil)), let normalized else { return }
-                navigation.tab = .calls
                 // S36 C5-b: one request, whether or not this screen knows a SIM. The dialer owns the SIM list,
                 // so it resolves the SIM, confirms, and dials — this screen no longer decides.
-                navigation.pendingDialPrefill = DialPrefillRequest(
-                    simID: simID, remoteNumber: normalized, token: UUID(), confirm: true
-                )
+                navigation.requestDial(normalized, simID: simID)
                 dismiss?()
             } label: {
-                Label("拨打", systemImage: "phone.fill").frame(maxWidth: .infinity, minHeight: 44)
+                cell("拨打", symbol: "phone", tint: Signal.call)
             }
-            .buttonStyle(.borderedProminent)
             .disabled(normalized == nil || !availability.canDial(on: simID ?? SIMSelectionPolicy.preferredID(in: availability.sims, current: nil)))
             .accessibilityIdentifier("contactActions.call")
 
             Button {
                 guard let normalized else { return }
-                navigation.tab = .messages
-                navigation.pendingCompose = HistoryComposeRequest(simID: simID, remoteNumber: normalized, token: UUID())
+                navigation.requestSMS(normalized, simID: simID)
                 dismiss?()
             } label: {
-                Label("短信", systemImage: "message.fill").frame(maxWidth: .infinity, minHeight: 44)
+                cell("短信", symbol: "message", tint: Signal.ink)
             }
-            .buttonStyle(.bordered)
             .disabled(normalized == nil)
             .accessibilityIdentifier("contactActions.sms")
 
             Button(action: onInfo) {
-                Label("信息", systemImage: "info.circle").frame(maxWidth: .infinity, minHeight: 44)
+                cell("信息", symbol: "info.circle", tint: Signal.ink)
             }
-            .buttonStyle(.bordered)
             .accessibilityIdentifier("contactActions.info")
         }
-        .labelStyle(.titleAndIcon)
+        .buttonStyle(.borderless)
         .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+    }
+
+    private func cell(_ title: String, symbol: String, tint: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).font(.title3.weight(.medium))
+            Text(title).font(.body)
+        }
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .contentShape(Rectangle())
+    }
+}
+
+/// S95 number row: label + monospaced number, with round 短信 / 拨打 buttons.
+struct ContactNumberRow: View {
+    @Environment(UIAvailabilityState.self) private var availability
+    let label: String
+    let number: String
+    let navigation: AppNavigation
+    var dismiss: (() -> Void)?
+
+    private var normalized: String { PhoneNumberText.normalized(number) }
+    private var dialSIM: String? { SIMSelectionPolicy.preferredID(in: availability.sims, current: nil) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(.footnote).foregroundStyle(Signal.ink2)
+                Text(number).font(.title3).monospacedDigit().foregroundStyle(Signal.ink).textSelection(.enabled)
+            }
+            Spacer(minLength: 8)
+            Button { navigation.requestSMS(normalized, simID: nil); dismiss?() } label: {
+                Image(systemName: "message").font(.body.weight(.medium)).foregroundStyle(Signal.ink)
+                    .frame(width: 44, height: 44)
+            }
+            .disabled(normalized.isEmpty)
+            .accessibilityLabel("发短信给 \(number)")
+            Button { navigation.requestDial(normalized, simID: nil); dismiss?() } label: {
+                Image(systemName: "phone").font(.body.weight(.medium)).foregroundStyle(Signal.call)
+                    .frame(width: 44, height: 44).background(Signal.callSoft, in: Circle())
+            }
+            .disabled(normalized.isEmpty || !availability.canDial(on: dialSIM))
+            .accessibilityLabel("拨打 \(number)")
+        }
+        .buttonStyle(.borderless)
+    }
+}
+
+extension AppNavigation {
+    /// The dialer resolves the SIM, confirms and dials (S36 C5-b); callers only hand over the number.
+    func requestDial(_ normalized: String, simID: String?) {
+        guard !normalized.isEmpty else { return }
+        tab = .calls
+        pendingDialPrefill = DialPrefillRequest(simID: simID, remoteNumber: normalized, token: UUID(), confirm: true)
+    }
+
+    func requestSMS(_ normalized: String, simID: String?) {
+        guard !normalized.isEmpty else { return }
+        tab = .messages
+        pendingCompose = HistoryComposeRequest(simID: simID, remoteNumber: normalized, token: UUID())
     }
 }
 
@@ -510,6 +579,7 @@ struct ContactEditView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Group {
                 if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
                 Section("姓名") {
                     TextField("显示名称", text: $displayName).frame(minHeight: 44)
@@ -583,7 +653,10 @@ struct ContactEditView: View {
                         Text("版本冲突")
                     }
                 }
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .disabled(saving)
             .navigationTitle(isEditing ? "编辑联系人" : "新建联系人")
             .navigationBarTitleDisplayMode(.inline)

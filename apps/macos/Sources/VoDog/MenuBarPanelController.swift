@@ -15,7 +15,7 @@ extension Animation {
 
 @MainActor
 private final class MenuBarPanelLayout: ObservableObject {
-    @Published var maximumHeight: CGFloat = 720
+    @Published var maximumHeight: CGFloat = MenuBarHubMetrics.defaultMaximumHeight
 }
 
 private final class MenuBarHostingView<Content: View>: NSHostingView<Content> {
@@ -620,7 +620,7 @@ final class MenuBarPanelController: NSObject, NSWindowDelegate {
             min(buttonFrame.minY - 4, visibleFrame.maxY - 4)
         )
         let availableHeight = max(1, topY - visibleFrame.minY - 8)
-        let maximumHeight = min(720, availableHeight)
+        let maximumHeight = min(MenuBarHubMetrics.defaultMaximumHeight, availableHeight)
         if abs(panelLayout.maximumHeight - maximumHeight) > 0.5 {
             panelLayout.maximumHeight = maximumHeight
         }

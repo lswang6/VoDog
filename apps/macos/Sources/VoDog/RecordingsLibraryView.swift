@@ -108,7 +108,6 @@ struct RecordingsLibraryView: View {
             .communicationSidebarScrollEdgeEffect()
         }
         .communicationSidebarColumnStyle()
-        .communicationModuleFloatingSidebar()
     }
 
     private func recordingRow(_ record: CallRecordingRecord) -> some View {
@@ -128,7 +127,7 @@ struct RecordingsLibraryView: View {
                     if recordings.playingRecordingID == record.id {
                         Image(systemName: recordings.isPlaybackPlaying ? "waveform" : "play.fill")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
+                            .selectionTint(Signal.brand)
                     }
 
                     Text(recordingDuration(record.duration))
@@ -147,7 +146,7 @@ struct RecordingsLibraryView: View {
                 if record.isIncomplete {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .selectionTint(Signal.warn)
                         .help(L10n.tr("录音过程中部分音频未能写入"))
                 }
             }
@@ -274,12 +273,12 @@ private struct RecordingDirectionBadge: View {
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(directionColor.opacity(0.14))
+            Color.clear
+                .selectionBackground(directionColor, opacity: 0.14, in: Circle())
 
             Image(systemName: directionIcon)
                 .font(.system(size: iconSize, weight: .semibold))
-                .foregroundStyle(directionColor)
+                .selectionTint(directionColor)
         }
         .frame(width: size, height: size)
         .accessibilityLabel(

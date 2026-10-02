@@ -11,7 +11,6 @@ struct ProxyManagementView: View {
         ResizableCommunicationSplit(sidebarWidth: $sidebarWidth) {
             sidebar
                 .communicationSidebarColumnStyle()
-                .communicationModuleFloatingSidebar()
         } detail: {
             detail
                 .communicationDetailColumnStyle()
@@ -149,7 +148,7 @@ private struct ProxyRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Circle().fill(statusColor).frame(width: 8, height: 8).padding(.top, 6)
+            Circle().selectionTint(statusColor).frame(width: 8, height: 8).padding(.top, 6)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     Text(configuration.name).lineLimit(1)

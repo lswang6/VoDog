@@ -143,25 +143,9 @@ private struct AdaptiveGlassToggleTrack: View {
         controlSize == .mini ? 2 : 3
     }
 
-    @ViewBuilder
+    /// Signal switch track: callFill when on, surface3 when off (spec Mac-Device).
     private var track: some View {
-        let shape = Capsule()
-        if #available(macOS 26.0, *) {
-            shape
-                .fill(Color.clear)
-                .glassEffect(
-                    .regular
-                        .tint(isOn ? Color.accentColor : Color.secondary.opacity(0.12))
-                        .interactive(),
-                    in: shape
-                )
-        } else {
-            shape
-                .fill(isOn ? Color.accentColor : Color.secondary.opacity(0.18))
-                .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.28), lineWidth: 0.5)
-                }
-        }
+        Capsule().fill(isOn ? Signal.callFill : Signal.surface3)
     }
 }
 
@@ -377,15 +361,12 @@ extension View {
         )
     }
 
+    /// Signal card (surface + 1px line, radius 16); `treatment` kept for existing call sites.
     func adaptiveGlassCard(
-        cornerRadius: CGFloat = 18,
+        cornerRadius: CGFloat = Signal.Radius.card,
         treatment: AdaptiveGlassTreatment = .regular
     ) -> some View {
-        adaptiveGlassSurface(
-            cornerRadius: cornerRadius,
-            padding: 13,
-            treatment: treatment
-        )
+        signalCard(cornerRadius: cornerRadius)
     }
 
     func adaptiveConcentricGlassSurface(

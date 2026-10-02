@@ -299,9 +299,10 @@ final class CommunicationWindowController: NSObject, NSWindowDelegate {
             window.isOpaque = true
             switch kind {
             case .phone:
-                window.minSize = NSSize(width: 700, height: 480)
-                window.setContentSize(NSSize(width: 700, height: 480))
-                window.setFrameAutosaveName("VoDogCommunicationWindow.v5")
+                // 220 sidebar + 300 list + a usable detail column.
+                window.minSize = NSSize(width: 940, height: 560)
+                window.setContentSize(NSSize(width: 1000, height: 640))
+                window.setFrameAutosaveName("VoDogCommunicationWindow.v6")
             case .messages:
                 window.minSize = NSSize(width: 680, height: 480)
                 window.setContentSize(NSSize(width: 720, height: 500))

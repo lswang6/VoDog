@@ -5,7 +5,7 @@ import {CallRecording} from './recording';
 import {preferPixelSource} from './recording-contract';
 import {CallDetailGuard} from './call-detail-guard';
 import {Pager,clampPage,normalizePageSize,readViewState,storedPage,storedText,writeViewState,type PageSize} from './pager';
-import {AiTranscript} from './ai-transcript';
+import {AiTranscript,clockOffset} from './ai-transcript';
 import {HistoryCallActions} from './history-call-actions';
 import {browserSessionGeneration,expireBrowserSession} from './session-boundary';
 import {formatCompactCallDate,gatewayCalendarDate,gatewayDisplayTimeZone,shiftCalendarDate} from './gateway-time';
@@ -79,8 +79,8 @@ function errorStatus(error:unknown):number{
  return typeof status==='number'?status:0;
 }
 
-export function CallTranscript({callId,request}:{callId:string;request?:ApiRequest}){
- const [opened,setOpened]=useState(false);
+export function CallTranscript({callId,request,initialOpen=false}:{callId:string;request?:ApiRequest;initialOpen?:boolean}){
+ const [opened,setOpened]=useState(initialOpen);
  const [missingNotice,setMissingNotice]=useState('');
  return <div className="report-transcript"><button type="button" className="passkey" aria-expanded={opened} onClick={()=>{setMissingNotice('');setOpened(v=>!v);}}>{opened?'收起转录':'查看转录'}</button>{missingNotice&&<p className="note" role="status">{missingNotice}</p>}{opened&&request&&<CallDetailGuard callId={callId} request={request} onMissing={message=>{setOpened(false);setMissingNotice(message);}}/>}{opened&&<TranscriptDetail callId={callId}/>}</div>;
 }
@@ -98,7 +98,13 @@ function TranscriptDetail({callId}:{callId:string}){
  if(value.status!=='succeeded')return <p role="status">{value.status==='retry'?'转录暂时失败，正在等待重试。':'转录处理中…'}</p>;
  if(!value.result)return <p>转录结果暂不可用。</p>;
  const blocks=mergeTranscriptSegments(value.result.segments);
- return <div className="transcript-detail">{value.result.summary&&<p>{value.result.summary}</p>}{blocks.length?blocks.map((block,index)=><p key={index}><strong>{transcriptTrackLabel(block.track)}</strong><br/>{block.text}</p>):<p>{value.result.text}</p>}<p className="note">机器转录供参考，可对照原始录音核实。</p></div>;
+ return <div className="transcript-detail">{value.result.summary&&<p className="transcript-summary"><strong>摘要</strong>{value.result.summary}</p>}{blocks.length?blocks.map((block,index)=><p key={index} className="transcript-line"><span className="transcript-time num">{typeof block.startMs==='number'?clockOffset(block.startMs):''}</span><strong className={block.speaker==='ai'?'speaker-ai':undefined}>{speakerLabel(block.track,block.speaker)}</strong><span className="transcript-text">{block.text}</span></p>):<p>{value.result.text}</p>}<p className="note">机器转录供参考，可对照原始录音核实。</p></div>;
+}
+/** Transcript lines read 对方 / 我 (S95); other tracks keep their full track name. */
+function speakerLabel(track:string,speaker?:string):string{
+ if(speaker==='ai')return 'AI';
+ if(track==='ai_realtime_transcript'&&speaker==='remote')return '对方';
+ return track==='remote_original'?'对方':track==='caller_original'||track==='caller_uplink'?'我':transcriptTrackLabel(track);
 }
 
 /** 今天/7 天/30 天 are inclusive calendar windows ending today; 自定义 keeps whatever the two date inputs hold. */
@@ -165,6 +171,16 @@ export function talkDuration(item:{answeredAt?:string|null;endedAt?:string|null}
 export function callDurationLabel(item:Pick<ReportItem,'answeredAt'|'endedAt'>):string{
  const duration=talkDuration(item);
  return duration?`通话 ${duration}`:'未接通';
+}
+
+/** S95 row tags, only from fields the report already carries. */
+export function reportTags(item:Pick<ReportItem,'recordingStatus'|'transcriptState'|'summary'|'hasAiTranscript'>):string[]{
+ return [
+  item.recordingStatus==='ready'||item.recordingStatus==='complete'?'录音':'',
+  item.transcriptState==='succeeded'?'转录':'',
+  (item.summary||'').trim()?'摘要':'',
+  item.hasAiTranscript?'AI 对话':'',
+ ].filter(Boolean);
 }
 
 function simLabel(sim:ReportItem['sim']):string{
@@ -367,6 +383,7 @@ export function CallReports({
        </div>
        <p className="report-meta">
         {simLabel(item.sim)} · {item.direction==='outgoing'?'呼出':'呼入'} · {callDurationLabel(item)} · {answerModeLabel(item)}
+        {reportTags(item).map(tag=><span key={tag} className={'record-tag'+(tag==='AI 对话'?' tag-ai':'')}>{tag}</span>)}
        </p>
        {/* `false` is a classified, harmless call and wears no pill at all. */}
        {item.blockRecommended!==false&&(
@@ -401,8 +418,8 @@ export function CallReports({
 }
 
 /** “查看转录” points at the AI 对话 when that is the only text this call produced (S22 客户端合同); call rows reuse it, fetching only on click. */
-export function AiTranscriptToggle({callId,request,labels=['查看转录','收起转录']}:{callId:string;request:ApiRequest;labels?:[string,string]}){
- const [opened,setOpened]=useState(false);
+export function AiTranscriptToggle({callId,request,labels=['查看转录','收起转录'],initialOpen=false}:{callId:string;request:ApiRequest;labels?:[string,string];initialOpen?:boolean}){
+ const [opened,setOpened]=useState(initialOpen);
  const [missingNotice,setMissingNotice]=useState('');
  return (
   <div className="report-transcript">

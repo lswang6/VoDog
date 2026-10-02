@@ -104,7 +104,6 @@ struct VoDogRecordsView: View {
             pager.padding(.horizontal, 14).padding(.vertical, 8)
         }
         .communicationSidebarColumnStyle()
-        .communicationModuleFloatingSidebar()
     }
 
     @ViewBuilder private var listBody: some View {
@@ -144,6 +143,7 @@ struct VoDogRecordsView: View {
                                            state: call.isMissedIncoming ? "未接来电" : CCRecordLabels.state(call.state)))
                             .accessibilityAddTraits(selectedID == call.id ? .isSelected : [])
                         }
+                        .listRowInsets(CommunicationUI.listRowInsets)
                     }
                 } else {
                     ForEach(reports) { item in
@@ -159,6 +159,7 @@ struct VoDogRecordsView: View {
                                 + rowLabel(number: item.remoteNumber, name: item.internal == true ? recordTitle(item.asCallRecord, ownSIM: item.sim?.label) : item.contactName, state: nil))
                             .accessibilityAddTraits(selectedID == item.callId ? .isSelected : [])
                         }
+                        .listRowInsets(CommunicationUI.listRowInsets)
                     }
                 }
                 if let listError {
@@ -308,9 +309,9 @@ private struct VoDogCallRow: View {
             Image(systemName: call.showsBlockedMark ? "hand.raised.slash.fill"
                 : call.isIncoming ? "phone.arrow.down.left" : "phone.arrow.up.right")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(call.showsBlockedMark || call.isMissedIncoming || call.state == "failed" ? Color.red : Color.accentColor)
+                .selectionTint(call.showsBlockedMark || call.isMissedIncoming || call.state == "failed" ? Signal.danger : Signal.brand)
                 .frame(width: 30, height: 30)
-                .background(Circle().fill(Color.accentColor.opacity(0.10)))
+                .selectionBackground(Signal.brand, opacity: 0.10, in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(recordTitle(call, ownSIM: ownSIM))
@@ -325,7 +326,8 @@ private struct VoDogCallRow: View {
             }
             Spacer(minLength: 6)
             Text(stateText)
-                .font(.caption).foregroundStyle(call.isMissedIncoming ? Color.red : Color.secondary)
+                .font(.caption)
+                .selectionTint(call.isMissedIncoming ? AnyShapeStyle(Signal.danger) : AnyShapeStyle(.secondary))
                 .fixedSize()
         }
         .padding(.vertical, 4)
@@ -404,9 +406,9 @@ private struct ReportBadges: View {
     private func pill(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.caption2.weight(.medium))
-            .foregroundStyle(color)
+            .selectionTint(color)
             .padding(.horizontal, 6).padding(.vertical, 1.5)
-            .background(Capsule().fill(color.opacity(0.12)))
+            .selectionBackground(color, opacity: 0.12, in: Capsule())
             .lineLimit(1)
     }
 }
@@ -660,7 +662,6 @@ private struct VoDogRecordDetail: View {
         case "failed":
             Label(L10n.tr("转录失败"), systemImage: "xmark.circle").foregroundStyle(.red)
                 .reportsVoDogError(L10n.tr("转录失败"))
-            if let message = job.error?.message { Text(message).font(.caption).foregroundStyle(.secondary) }
         case "succeeded":
             if let result = job.result { transcriptResult(result) }
             else {
@@ -668,7 +669,7 @@ private struct VoDogRecordDetail: View {
                     .reportsVoDogError(L10n.tr("转录结果无效"))
             }
         default:
-            Text(job.status).foregroundStyle(.secondary)
+            EmptyView()  // unknown server status: no raw enum on screen
         }
     }
 

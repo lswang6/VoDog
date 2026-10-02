@@ -24,6 +24,7 @@ struct SMSContactPicker: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
                 if !loaded && cachedContacts.isEmpty && availability.canMutate {
                     ProgressView("正在读取通讯录…")
@@ -90,7 +91,10 @@ struct SMSContactPicker: View {
                 }
                 Text("可选择多个联系人及每位联系人的多个号码。")
                     .font(.footnote).foregroundStyle(.secondary)
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .listStyle(.insetGrouped)
             .navigationTitle("选择收件人")
             .navigationBarTitleDisplayMode(.inline)
@@ -120,7 +124,7 @@ struct SMSContactPicker: View {
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
-                .background(Color(uiColor: .systemGroupedBackground))
+                .background(Signal.bg)
             }
             .task(id: "\(session.sessionIdentity?.uuidString ?? "none"):\(query):\(availability.canMutate)") {
                 await load(reset: true)

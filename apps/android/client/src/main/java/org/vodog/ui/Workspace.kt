@@ -55,6 +55,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import org.json.JSONObject
+import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.graphics.Color
 
 /** Presentation only: media failures and refresh gaps never mean a call has ended. */
 internal data class CallPresentation(
@@ -89,11 +99,11 @@ private val CallPresentationSaver = listSaver<CallPresentation, String>(
  * the two swapped, so muscle memory moved between the two apps (R4 Part B must-fix).
  */
 internal enum class Destination(val tabLabel: String, val title: String, val icon: ImageVector) {
-    CALL("通话", "电话", Icons.Filled.Phone),
-    SMS("短信", "短信", Icons.AutoMirrored.Filled.Message),
-    HISTORY("记录", "记录", Icons.Filled.History),
-    CONTACTS("通讯录", "通讯录", Icons.Filled.Contacts),
-    SETTINGS("设置", "设置", Icons.Filled.Settings),
+    CALL("电话", "电话", Icons.Outlined.Phone),
+    SMS("短信", "短信", Icons.AutoMirrored.Outlined.Chat),
+    HISTORY("记录", "记录", Icons.Outlined.History),
+    CONTACTS("通讯录", "通讯录", Icons.Outlined.Person),
+    SETTINGS("设置", "设置", Icons.Outlined.Tune),
 }
 
 internal enum class WorkspaceMessageKind { CONFIRMATION, ERROR }
@@ -139,9 +149,8 @@ internal fun Workspace(
     // S69: ui.error_shown 的 screen 跟随当前页签。
     SideEffect { ClientDiag.screen = destination.name.lowercase() }
     var detailVisible by remember(destination) { mutableStateOf(false) }
-    // Hoisted out of SmsPage because the "新短信" affordance lives in the top app bar.
+    // Hoisted out of SmsPage so a tab switch closes the composer.
     var smsComposing by rememberSaveable { mutableStateOf(false) }
-    var smsCanCompose by remember { mutableStateOf(false) }
     LaunchedEffect(destination) { if (destination != Destination.SMS) smsComposing = false }
     // S21 §F: 拨打电话 / 发送短信 on the contact card switch tab here; the target page pre-fills the
     // number and clears the request, so the same number twice in a row still navigates.
@@ -171,47 +180,21 @@ internal fun Workspace(
             topBar = {
                 Column(Modifier.statusBarsPadding()) {
                     if (!state.networkAvailable) {
-                        Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.testTag("workspace.offline")) {
-                            Row(Modifier.fillMaxWidth().padding(ScreenPadding), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Filled.WifiOff, null)
-                                Text(offlineBannerText(state.media), style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
+                        val live = state.media.callId != null && state.media.phase in setOf(CallMediaPhase.CONNECTING, CallMediaPhase.CONNECTED)
+                        StatusBanner(
+                            StatusBannerKind.DEVICE_OFFLINE,
+                            if (live) offlineBannerText(state.media) else "显示的是上次加载的内容；草稿可以继续编辑，联网后自动刷新。",
+                            Modifier.padding(horizontal = ScreenPadding, vertical = 8.dp).testTag("workspace.offline"),
+                        )
                     }
-                    presentedCall?.takeIf { !presentation.expanded }?.let { call ->
-                        Surface(
-                            onClick = { presentation = presentation.restore() },
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget).testTag("call.restore"),
-                        ) {
-                            Row(Modifier.padding(horizontal = ScreenPadding, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                val ending = call.optString("id") in state.endingCallIds || call.optString("state") == "ending"
-                                if (ending) CircularProgressIndicator(Modifier.size(24.dp).clearAndSetSemantics {}, strokeWidth = 2.dp)
-                                else Icon(Icons.Filled.Phone, null)
-                                val callStatus = if (ending) "正在结束" else callStateLabel(call.optString("state"))
-                                val callSim = (state.sims as? RemoteList.Loaded)?.items
-                                    ?.firstOrNull { it.optString("id") == call.optString("simId") }
-                                    ?.let { runCatching { it.toClientSim() }.getOrNull() }
-                                Column(Modifier.weight(1f)) {
-                                    Text("$callStatus · ${callTitle(call)}",
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(callSim?.let { simPickerTitle(it) } ?: "SIM",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                CallDurationText(call, compact = true)
-                                Text("返回通话", style = MaterialTheme.typography.labelLarge)
-                            }
-                        }
-                    }
+                    presentedCall?.takeIf { !presentation.expanded }?.let { call -> CollapsedCallBar(call, state) { presentation = presentation.restore() } }
                     // S68: one row per tab page — big title on the left, that page's action on the right.
                     if (!detailVisible) TopAppBar(
                         windowInsets = WindowInsets(0, 0, 0, 0),
                         title = {
                             Text(
                                 destination.title,
-                                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.titleLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -229,13 +212,6 @@ internal fun Workspace(
                                 ) {
                                     Icon(Icons.Filled.Refresh, contentDescription = "刷新通话", tint = MaterialTheme.colorScheme.primary)
                                 }
-                                Destination.SMS -> IconButton(
-                                    onClick = { smsComposing = true },
-                                    enabled = smsCanCompose && !state.busy,
-                                    modifier = Modifier.padding(end = 4.dp).size(TouchTarget),
-                                ) {
-                                    Icon(Icons.Filled.Edit, contentDescription = "新短信", tint = MaterialTheme.colorScheme.primary)
-                                }
                                 else -> Unit
                             }
                         },
@@ -244,7 +220,7 @@ internal fun Workspace(
             },
             bottomBar = {
                 val haptic = LocalHapticFeedback.current
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                NavigationBar(containerColor = LocalSignal.current.chrome, modifier = Modifier.heightIn(min = 80.dp)) {
                     Destination.entries.forEach { item ->
                         NavigationBarItem(
                             selected = destination == item,
@@ -258,10 +234,18 @@ internal fun Workspace(
                                 }
                                 BadgedBox(badge = { CountBadge(count) }) { Icon(item.icon, contentDescription = item.tabLabel) }
                             },
-                            label = { Text(item.tabLabel) },
+                            label = {
+                                Text(
+                                    item.tabLabel,
+                                    fontWeight = if (destination == item) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            },
                             colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                                 unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             ),
@@ -280,16 +264,19 @@ internal fun Workspace(
                     Box(Modifier.padding(horizontal = ScreenPadding, vertical = 8.dp)) { StateMessage(state) }
                 }
                 if (state.refreshMessage.isNotBlank()) {
-                    Box(Modifier.padding(horizontal = ScreenPadding, vertical = 8.dp)) { MessageCard(state.refreshMessage) }
+                    StatusBanner(
+                        StatusBannerKind.SERVICE_UNAVAILABLE,
+                        "正在自动重试。${state.refreshMessage}",
+                        Modifier.padding(horizontal = ScreenPadding, vertical = 8.dp),
+                    )
                 }
                 when (destination) {
-                    Destination.CALL -> CallPage(state, model, onShowCall = { presentation = presentation.restore() })
+                    Destination.CALL -> CallPage(state, model, onShowCall = { presentation = presentation.restore() }, onDetailVisible = { detailVisible = it })
                     Destination.SMS -> SmsPage(
                         state = state,
                         model = model,
                         composing = smsComposing,
                         onComposingChange = { smsComposing = it },
-                        onCanComposeChange = { smsCanCompose = it },
                         onDetailVisible = { detailVisible = it },
                     )
                     Destination.CONTACTS -> ContactsPage(state, model) { detailVisible = it }
@@ -303,6 +290,48 @@ internal fun Workspace(
         if (state.contactCard != null) ContactCardSheet(state, model)
         presentedCall?.takeIf { presentation.expanded }?.let { call ->
             FullscreenCall(call, state, model, onMinimize = { presentation = presentation.minimize() })
+        }
+    }
+}
+
+/**
+ * S46 collapsed call: one full-width 44 dp callFill row under the status bar — ● name timer … 返回通话 ›.
+ * Tapping restores the full-screen call; it never ends the call.
+ */
+@Composable
+private fun CollapsedCallBar(call: JSONObject, state: ClientUiState, onRestore: () -> Unit) {
+    val ending = call.optString("id") in state.endingCallIds || call.optString("state") == "ending"
+    val signal = LocalSignal.current
+    Surface(
+        onClick = onRestore,
+        color = if (ending) signal.surface3 else signal.callFill,
+        contentColor = if (ending) signal.ink2 else Color.White,
+        modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget).testTag("call.restore"),
+    ) {
+        Row(
+            Modifier.padding(horizontal = ScreenPadding, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (ending) CircularProgressIndicator(Modifier.size(14.dp).clearAndSetSemantics {}, color = LocalContentColor.current, strokeWidth = 2.dp)
+            else Box(Modifier.size(8.dp).background(Color.White, CircleShape))
+            Text(
+                when {
+                    ending -> "正在结束… · "
+                    call.optString("state") != "active" -> "${callStateLabel(call.optString("state"))} · "
+                    else -> ""
+                } + callTitle(call),
+                Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            CallDurationText(call, compact = true)
+            // S95b §A: the line's own answer mode (per-SIM settings), compact badge.
+            (state.sims as? RemoteList.Loaded)?.items.orEmpty().firstOrNull { it.optString("id") == call.optString("simId") }
+                ?.let { runCatching { it.toClientSim() }.getOrNull() }?.let { AiBadge(it.answerMode) }
+            Spacer(Modifier.weight(1f))
+            Text("返回通话 ›", style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false)
         }
     }
 }

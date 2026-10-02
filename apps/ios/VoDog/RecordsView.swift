@@ -112,11 +112,6 @@ struct RecordsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Text("全部号码 · 当前账号可查看的记录")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16).padding(.top, 8)
-                    .accessibilityIdentifier("records.scope")
                 Picker("记录分类", selection: $tab) {
                     ForEach(RecordsTab.allCases) { Text($0.title).tag($0) }
                 }
@@ -124,14 +119,20 @@ struct RecordsView: View {
                 .labelsHidden()
                 .accessibilityIdentifier("records.tab")
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color(uiColor: .systemGroupedBackground))
+                .padding(.top, 8)
+                Text("范围：全部线路")
+                    .font(.subheadline).foregroundStyle(Signal.ink2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20).padding(.vertical, 8)
+                    .accessibilityLabel("范围：全部线路，当前账号可查看的记录")
+                    .accessibilityIdentifier("records.scope")
                 switch tab {
                 case .calls: callList
                 case .reports: reportList
                 case .interceptions: InterceptionsView(embedded: true, paging: interceptionsPaging)
                 }
             }
+            .background(Signal.bg)
             .navigationTitle("记录")
             .toolbarTitleDisplayMode(.inlineLarge)
             // The calls list is also what names the gateway time zone the report window is read in, so it loads
@@ -217,48 +218,48 @@ struct RecordsView: View {
 
     private var callList: some View {
         List {
+            Group {
             if let callsSnapshotCaption, RecordSearchPolicy.showsSnapshotCaption(
                 query: callQuery, page: callsPaging.page, stale: callsError != nil || !availability.canMutate
             ) {
                 Text(callsSnapshotCaption).font(.caption).foregroundStyle(.secondary)
             }
-            Section {
-                if !callsLoaded {
-                    HStack { ProgressView(); Text("正在读取通话记录…") }
-                } else if calls.isEmpty, callsError == nil {
+            if !callsLoaded {
+                Section { HStack { ProgressView(); Text("正在读取通话记录…") } }
+            } else if calls.isEmpty, callsError == nil {
+                Section {
                     Label(
                         RecordSearchPolicy.trimmed(callQuery).isEmpty ? "暂无通话记录" : "没有匹配的通话",
                         systemImage: "clock"
                     ).foregroundStyle(.secondary)
-                } else {
-                    ForEach(calls) { call in
-                        HStack(spacing: 0) {
-                            NavigationLink { RecordDetailView(call: call) } label: { CallHistoryRow(call: call, sims: availability.sims) }
-                                .accessibilityIdentifier("records.callDetail")
-                            // §F: the "i" is a sibling of the link, not inside it, so it opens the card
-                            // instead of pushing the detail page.
-                            Button {
-                                card = ContactCardTarget(call: call)
-                            } label: {
-                                Image(systemName: "info.circle")
-                                    .font(.title3)
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("\(call.remoteNumber ?? "未知号码") 的联系人卡片")
-                            .accessibilityIdentifier("records.contactCard")
+                }
+            }
+            ForEach(RecordDaySection.group(calls, sims: availability.sims), id: \.title) { day in
+                Section(day.title) {
+                    ForEach(day.calls) { call in
+                        NavigationLink { RecordDetailView(call: call) } label: { CallHistoryRow(call: call, sims: availability.sims, clockOnly: true) }
+                            .navigationLinkIndicatorVisibility(.hidden)
+                            .accessibilityIdentifier("records.callDetail")
+                            // §F: the contact card stays one long-press / swipe away instead of a per-row (i).
+                            .accessibilityAction(named: Text("联系人卡片")) { card = ContactCardTarget(call: call) }
+                        .contextMenu {
+                            Button("联系人卡片", systemImage: "person.crop.circle") { card = ContactCardTarget(call: call) }
+                            historyActions(for: call)
                         }
-                        .contextMenu { historyActions(for: call) }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) { historyActions(for: call) }
                     }
                 }
-                if let callsError {
+            }
+            if let callsError {
+                Section {
                     Label(callsError, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(Color.callerDanger)
                         .reportsError(callsError, screen: "records", site: "calls")
                 }
             }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .searchable(text: Binding(get: { callQuery }, set: { if availability.canMutate { callQuery = $0 } }), prompt: RecordSearchPolicy.searchPrompt)
         // 下拉刷新 re-reads the page that is on screen; it is a refresh, not a jump back to the first page.
         .refreshable { await loadCalls(debounced: false) }
@@ -288,49 +289,148 @@ struct RecordsView: View {
 /// stays on the right. `contactName` is absent on a pre-S21 Control, which simply prints the number alone.
 ///
 /// Its own view so the paged list can be previewed without a session.
+/// S95: the records list is grouped by gateway-local day (今天 / 昨天 / M月d日), page order kept.
+struct RecordDaySection {
+    let title: String
+    var calls: [CallRecord]
+
+    static func group(_ calls: [CallRecord], sims: [SIMChannel], now: Date = .now) -> [RecordDaySection] {
+        var sections: [RecordDaySection] = []
+        for call in calls {
+            let zone = GatewayTimeDisplay.resolvedTimeZone(
+                callZone: call.gatewayTimeZone, simZone: sims.first { $0.id == call.simId }?.timeZone
+            )
+            let title = dayTitle(call.startedAt, zone: zone, now: now)
+            if sections.last?.title == title { sections[sections.count - 1].calls.append(call) }
+            else if let index = sections.firstIndex(where: { $0.title == title }) { sections[index].calls.append(call) }
+            else { sections.append(RecordDaySection(title: title, calls: [call])) }
+        }
+        return sections
+    }
+
+    static func dayTitle(_ value: String?, zone: TimeZone, now: Date) -> String {
+        guard let value, let date = GatewayTimeDisplay.parseISO(value) else { return "时间未知" }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        if calendar.isDate(date, inSameDayAs: now) { return "今天" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
+            return "昨天"
+        }
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        let sameYear = parts.year == calendar.component(.year, from: now)
+        return sameYear ? "\(parts.month ?? 0)月\(parts.day ?? 0)日" : "\(parts.year ?? 0)年\(parts.month ?? 0)月\(parts.day ?? 0)日"
+    }
+}
+
 struct CallHistoryRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let call: CallRecord
     var sims: [SIMChannel] = []
+    /// Date-sectioned lists only need the clock; a flat list shows 今天 HH:mm / 昨天 / 周X / M/D.
+    var clockOnly = false
+
+    private var sim: SIMChannel? { sims.first { $0.id == call.simId } }
+    private var timeText: String {
+        let zone = GatewayTimeDisplay.resolvedTimeZone(callZone: call.gatewayTimeZone, simZone: sim?.timeZone)
+        if clockOnly { return String(GatewayTimeDisplay.compact(call.startedAt, timeZone: zone).suffix(5)) }
+        return CompactTime.text(call.startedAt, zone: zone)
+    }
+    private var name: String { call.shownContactName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+    private var number: String {
+        let value = call.shownNumber(in: sims)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? ContactDisplay.unknownNumber : value
+    }
+    private var subline: String {
+        ([name.isEmpty ? nil : number, call.rowKindTitle, CallDurationLabel.text(answeredAt: call.answeredAt, endedAt: call.endedAt)]
+            + [call.s38BadgeTitle]).compactMap { $0 }.joined(separator: " · ")
+    }
 
     var body: some View {
         let unseen = UnreadDotPolicy.callUnseen(call, locallySeen: BadgeStore.shared.seenCallIDs)
-        HStack(spacing: 12) {
-            UnreadDot(visible: unseen)
-            if call.showsBlockedMark {
-                Image(systemName: ContactDisplay.blockedSymbol)
-                    .foregroundStyle(Color.callerDanger).frame(width: 28)
-                    .accessibilityHidden(true)
-            } else {
-                Image(systemName: call.direction == "incoming" ? "phone.arrow.down.left" : "phone.arrow.up.right")
-                    .foregroundStyle(call.state == "failed" ? Color.callerDanger : Color.accentColor).frame(width: 28)
+        let ax = dynamicTypeSize.isAccessibilitySize
+        HStack(alignment: ax ? .top : .center, spacing: 12) {
+            CallDirectionIcon(call: call)
+                .overlay(alignment: .topLeading) { if unseen { UnreadDot(visible: true).offset(x: -3, y: -1) } }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name.isEmpty ? number : name)
+                    .font(.body.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(call.isMissedIncoming ? Signal.danger : Signal.ink)
+                    .lineLimit(ax ? 3 : 1)
+                Text(subline)
+                    .font(.footnote).monospacedDigit().foregroundStyle(Signal.ink2)
+                    .lineLimit(ax ? 4 : 1).truncationMode(.middle)
+                    .accessibilityIdentifier(call.s38BadgeTitle == nil ? "" : "records.callBadge")
+                if ax { trailing(alignment: .leading) }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                // S36 C5-a: name on its own line, number below it — the accessibility label keeps the one-string form.
-                RecentCallTitle(number: call.shownNumber(in: sims), contactName: call.shownContactName, nameFont: .headline)
-                Text(gatewayClock(call.startedAt, zone: call.gatewayTimeZone)).font(.caption).foregroundStyle(.secondary)
-                // S38: 通过手机拨打 / 忙线自动拒接 / 忙线 AI 代接 — 状态列写不下的那条手机侧事实。
-                if let badge = call.s38BadgeTitle {
-                    Text(badge).font(.caption).foregroundStyle(.secondary)
-                        .accessibilityIdentifier("records.callBadge")
-                }
-                if let line = callLineTitle(call.simId, in: sims) {
-                    Text(line).font(.caption).foregroundStyle(.secondary)
-                }
-                // Accessibility sizes: the state moves under the text instead of squeezing it.
-                if dynamicTypeSize.isAccessibilitySize { stateText }
-            }
-            Spacer()
-            if !dynamicTypeSize.isAccessibilitySize { stateText }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !ax { trailing(alignment: .trailing).fixedSize() }
         }
+        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(unseen ? "未查看，" : "")\(call.showsBlockedMark ? "已屏蔽，" : "")\(ContactDisplay.numberWithName(number: call.shownNumber(in: sims), contactName: call.shownContactName))，\(call.rowStateTitle)\(call.s38BadgeTitle.map { "，\($0)" } ?? "")\(callLineTitle(call.simId, in: sims).map { "，\($0)" } ?? "")"
         )
     }
 
-    private var stateText: some View {
-        Text(call.rowStateTitle).font(.caption).foregroundStyle(call.isMissedIncoming ? .red : .secondary)
+    private func trailing(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text(timeText).font(.subheadline).monospacedDigit().foregroundStyle(Signal.ink3).lineLimit(1)
+            if let sim { SimChip(sim: sim, in: sims, compact: true, showsTail: false) }
+        }
+    }
+}
+
+/// S95 compact list time: 今天 → HH:mm, 昨天, 周X within a week, M/D this year, else yyyy/M/D.
+enum CompactTime {
+    static func text(_ value: String?, zone: TimeZone, now: Date = .now) -> String {
+        guard let value, let date = GatewayTimeDisplay.parseISO(value) else { return "—" }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        if calendar.isDate(date, inSameDayAs: now) {
+            return String(GatewayTimeDisplay.compact(value, timeZone: zone).suffix(5))
+        }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 99
+        if days == 1 { return "昨天" }
+        if (2...6).contains(days) {
+            return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][calendar.component(.weekday, from: date) - 1]
+        }
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        let prefix = parts.year == calendar.component(.year, from: now) ? "" : "\(parts.year ?? 0)/"
+        return "\(prefix)\(parts.month ?? 0)/\(parts.day ?? 0)"
+    }
+}
+
+/// S95 record row lead: 40 pt circle, direction by symbol and color (outgoing brand ↗, incoming ink2 ↙, missed
+/// danger ↙, AI ✦, blocked shield).
+struct CallDirectionIcon: View {
+    let call: CallRecord
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 40
+
+    private var style: (symbol: String, color: Color, fill: Color) {
+        if call.showsBlockedMark { return ("shield.lefthalf.filled", Signal.ink2, Signal.surface3) }
+        if call.isMissedIncoming || call.state == "failed" { return ("arrow.down.left", Signal.danger, Signal.dangerSoft) }
+        if call.answeredByPlatform == "ai" { return ("sparkle", Signal.ai, Signal.aiSoft) }
+        if call.direction == "incoming" { return ("arrow.down.left", Signal.ink2, Signal.surface3) }
+        return ("arrow.up.right", Signal.brand, Signal.brandSoft)
+    }
+
+    var body: some View {
+        let style = style
+        Image(systemName: call.state == "failed" && call.direction != "incoming" ? "arrow.up.right" : style.symbol)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(style.color)
+            .frame(width: size, height: size)
+            .background(style.fill, in: Circle())
+            .accessibilityHidden(true)
+    }
+}
+
+extension CallRecord {
+    /// Row subtitle wording: 呼出 / 呼入 / AI 代接 for finished calls, the state title otherwise.
+    var rowKindTitle: String {
+        guard state == "ended", !isMissedIncoming else { return rowStateTitle }
+        if answeredByPlatform == "ai" { return "AI 代接" }
+        return direction == "incoming" ? "呼入" : "呼出"
     }
 }
 
@@ -374,6 +474,7 @@ extension RecordsView {
 
     private var reportList: some View {
         List {
+            Group {
             Section { dateControl.disabled(!availability.canMutate) }
             if let reportSnapshotCaption, RecordSearchPolicy.showsSnapshotCaption(
                 query: reportQuery, page: reportPaging.page, stale: reportError != nil || !availability.canMutate
@@ -406,7 +507,10 @@ extension RecordsView {
                     ForEach(reportItems) { item in reportCard(item) }
                 }
             }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .searchable(text: Binding(get: { reportQuery }, set: { if availability.canMutate { reportQuery = $0 } }), prompt: RecordSearchPolicy.searchPrompt)
         .refreshable { await loadReport(debounced: false) }
         .task(id: reportRequest) { await loadReport(debounced: reportRequest.debounced) }
@@ -938,6 +1042,7 @@ struct RecordDetailView: View {
 
     var body: some View {
         List {
+            Group {
             // §F / user item 2.2: 拨打 / 短信 / 信息 sit above the facts, so the two things a record is usually
             // opened for do not need a scroll or a long press.
             Section {
@@ -1060,7 +1165,10 @@ struct RecordDetailView: View {
             if let call, let reason = FailureReasonDisplayPolicy.visibleReason(for: call) {
                 Section("失败原因") { Text(reason) }
             }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .navigationTitle("通话详情").navigationBarTitleDisplayMode(.inline)
         // S67: opening the detail marks the call seen (outgoing calls are never pending).
         .task(id: callID) {
@@ -1295,6 +1403,7 @@ private struct AiConversationRecordView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 if !loaded {
                     HStack { ProgressView(); Text("正在读取 AI 对话…") }
@@ -1314,7 +1423,10 @@ private struct AiConversationRecordView: View {
                     AiTranscriptRows(segments: segments, gatewayTimeZone: gatewayTimeZone)
                 }
             }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .navigationTitle("AI 对话")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { recordSheetDoneButton }
@@ -1359,6 +1471,7 @@ private struct TranscriptRecordView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 if !transcriptLoaded {
                     HStack { ProgressView(); Text("正在读取转录…") }
@@ -1379,7 +1492,10 @@ private struct TranscriptRecordView: View {
                     Label("尚未生成转录", systemImage: "text.bubble").foregroundStyle(.secondary)
                 }
             }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .navigationTitle("转录")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { recordSheetDoneButton }
@@ -1398,20 +1514,20 @@ private struct TranscriptRecordView: View {
             Label("转录处理中", systemImage: "hourglass").foregroundStyle(.secondary)
         case "retry":
             VStack(alignment: .leading, spacing: 4) {
-                Label("转录暂时失败，稍后会自动重试", systemImage: "arrow.clockwise").foregroundStyle(.orange)
+                Label("转录暂时失败，稍后会自动重试", systemImage: "arrow.clockwise").foregroundStyle(Signal.warn)
                 if let next = job.nextAttemptAt {
                     Text("下次尝试：\(gatewayClock(next, zone: gatewayTimeZone))").font(.caption).foregroundStyle(.secondary)
                 }
             }
         case "failed":
             VStack(alignment: .leading, spacing: 4) {
+                // S95b §C: the server's raw error message is not a user sentence; the label says what happened.
                 Label("转录失败", systemImage: "xmark.circle").foregroundStyle(Color.callerDanger)
-                if let message = job.error?.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
         case "succeeded":
             if let result = job.result { transcriptResult(result) }
             else { Label("转录结果无效", systemImage: "exclamationmark.triangle").foregroundStyle(Color.callerDanger) }
-        default: LabeledContent("转录状态", value: job.status)
+        default: LabeledContent("转录状态", value: TranscriptDisplayPolicy.unknownStatusTitle)
         }
     }
 
@@ -1437,11 +1553,8 @@ private struct TranscriptRecordView: View {
                 }.padding(.vertical, 3)
             }
         }
-        if !result.providers.isEmpty {
-            Text(result.providers.map { [$0.provider, $0.model, $0.version].compactMap { $0 }.joined(separator: " · ") }.joined(separator: " / "))
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-        Text("机器转录供参考，可对照原始录音核实。").font(.caption).foregroundStyle(.secondary)
+        // S95b §C: provider / model / version ids are not shown; only the human caption is.
+        ForEach(TranscriptDisplayPolicy.captionLines(result), id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
     }
 
     private func loadTranscript() async {
@@ -1511,6 +1624,7 @@ private struct RecordingRecordView: View {
 
     var body: some View {
         List {
+            Group {
             Section {
                 Picker("录音副本", selection: $recordingSource) {
                     ForEach(RecordingSource.allCases, id: \.rawValue) { Text($0.title(gatewayKind: gatewayKind, ownerJoinedLocal: ownerJoinedLocal)).tag($0) }
@@ -1519,7 +1633,10 @@ private struct RecordingRecordView: View {
                 .accessibilityIdentifier("records.recordingSource")
             }
             Section("录音") { recordingRows }
+            }
+            .listRowBackground(Signal.surface)
         }
+        .signalList()
         .navigationTitle("录音")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { recordSheetDoneButton }
@@ -1555,9 +1672,9 @@ private struct RecordingRecordView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if !manifest.archiveComplete {
-                Label("归档尚未完整发布。", systemImage: "waveform.badge.exclamationmark").font(.footnote).foregroundStyle(.orange)
+                Label("归档尚未完整发布。", systemImage: "waveform.badge.exclamationmark").font(.footnote).foregroundStyle(Signal.warn)
             } else if manifest.captureComplete == false {
-                Label("录制期间存在缺音，仍可试听已保存内容。", systemImage: "waveform.badge.exclamationmark").font(.footnote).foregroundStyle(.orange)
+                Label("录制期间存在缺音，仍可试听已保存内容。", systemImage: "waveform.badge.exclamationmark").font(.footnote).foregroundStyle(Signal.warn)
             }
             // S94: when the Pixel archive carries the uplink capture, it is the default pair (listed first).
             if manifest.defaultTogetherMode == .ownerJoined {
@@ -1697,7 +1814,7 @@ private struct RecordingRecordView: View {
                 .font(.caption).foregroundStyle(.secondary)
             durationOverlay(durationMs: derived.durationMs, isActive: false)
             if !derived.playoutComplete {
-                Text("播放轨不完整").font(.caption2).foregroundStyle(.orange)
+                Text("播放轨不完整").font(.caption2).foregroundStyle(Signal.warn)
             }
             Text("播放请使用上方“补偿后双向播放”；此处可单独下载该派生轨。")
                 .font(.caption).foregroundStyle(.secondary)
@@ -1728,7 +1845,7 @@ private struct RecordingRecordView: View {
             Text(detail).font(.caption).foregroundStyle(.secondary)
             durationOverlay(durationMs: durationMs, isActive: isPlaying || isLoading)
             if let warning {
-                Text(warning).font(.caption2).foregroundStyle(.orange)
+                Text(warning).font(.caption2).foregroundStyle(Signal.warn)
             }
             HStack(spacing: 12) {
                 if isLoading {
@@ -1909,6 +2026,7 @@ private struct PagedCallListPreviewHost: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 Section {
                     ForEach(calls) { call in
                         HStack(spacing: 0) {
@@ -1919,7 +2037,10 @@ private struct PagedCallListPreviewHost: View {
                         }
                     }
                 }
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .navigationTitle("记录")
             .toolbarTitleDisplayMode(.inlineLarge)
             .safeAreaInset(edge: .bottom) { PagerBar(store: store) }

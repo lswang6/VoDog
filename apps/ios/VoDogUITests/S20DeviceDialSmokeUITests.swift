@@ -15,7 +15,7 @@ final class S20DeviceDialSmokeUITests: XCTestCase {
         app.launch()
         ensureLoggedIn(app)
 
-        selectTab("通话", in: app)
+        selectTab("电话", in: app)
         XCTAssertTrue(app.navigationBars["电话"].waitForExistence(timeout: 8))
         let onlineSIM = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "在线")).firstMatch
         XCTAssertTrue(onlineSIM.waitForExistence(timeout: 20), "No online SIM in the strip")

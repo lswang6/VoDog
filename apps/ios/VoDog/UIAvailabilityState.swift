@@ -133,10 +133,14 @@ struct NetworkAvailabilityNotice: View {
     @Environment(UIAvailabilityState.self) private var availability
     var body: some View {
         if let reason = availability.reason {
-            Label(reason, systemImage: "wifi.exclamationmark")
-                .font(.footnote).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("network.availability")
+            // S95: 本机未联网 / 服务连接暂不可用 (spec §1.3); the existing reason stays the explanation.
+            let device = availability.path != .available
+            StatusBanner(
+                kind: device ? .deviceOffline : .serviceUnavailable,
+                title: availability.path == .unknown ? "正在确认网络" : (device ? "本机未联网" : "服务连接暂不可用"),
+                message: reason
+            )
+            .accessibilityIdentifier("network.availability")
         }
     }
 }

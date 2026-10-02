@@ -284,7 +284,8 @@ class S33BusinessJourneyTest {
         callList.performScrollToNode(hasTestTag(failedRowTag))
         val failedRow = hasTestTag(failedRowTag) and
             hasAnyDescendant(hasText(rejectedNumber)) and
-            hasAnyDescendant(hasText("+886 900 000 001 · 失败"))
+            // S95b compact row: `<direction> · 失败` on the second line; the line chip carries the SIM.
+            hasAnyDescendant(hasText(" · 失败", substring = true))
         compose.onNode(failedRow, useUnmergedTree = true).assertIsDisplayed()
         captureEvidence("01-calls-outbound-ended-rejected")
     }
@@ -597,8 +598,11 @@ class S33BusinessJourneyTest {
             replace("history.search", "0900000001")
             waitForText("S33 林美玲", substring = true)
             if (fromInfo) {
-                compose.onAllNodes(hasContentDescription("联系人卡片"), useUnmergedTree = true)
-                    .onFirst().performClick()
+                // S95b: the 记录 row has no ⓘ any more; the contact card opens from the detail's 更多 menu.
+                compose.onAllNodesWithTag("records.row", useUnmergedTree = true).onFirst().performClick()
+                waitForContentDescription("更多")
+                compose.onNodeWithContentDescription("更多").performClick()
+                clickText("联系人卡片")
                 waitForText("发送短信")
                 clickText("发送短信")
             } else {
@@ -638,20 +642,22 @@ class S33BusinessJourneyTest {
         captureEvidence("04-record-delete-confirm")
         clickText("取消")
         compose.onAllNodesWithTag("records.row", useUnmergedTree = true).onFirst().performClick()
-        waitForText("查看转录")
+        // S95b detail page: the 转录 card's button reads 查看录音转录; the recording card is an icon button.
+        waitForText("查看录音转录")
         fixture.injectFailure(
             "GET",
             "/api/v1/calls/${S33Ids.CALL_RECORDED}/transcript",
             "S33_TRANSCRIPT_TRANSIENT",
             "S33 转录瞬时失败",
         )
-        clickText("查看转录")
+        clickText("查看录音转录")
         waitForText("S33 转录瞬时失败", substring = true)
         fixture.clearFailures()
         clickText("重试")
         waitForText("安排验收回访")
         UiDevice.getInstance(instrumentation).pressBack()
-        waitUntilGone("转录", substring = false)
+        // 「转录」 is also the detail page's card title; the transcript text only lives in the sheet.
+        waitUntilGone("安排验收回访")
         waitForTag("history.detail.${S33Ids.CALL_RECORDED}")
         fixture.injectFailure(
             "GET",
@@ -659,7 +665,7 @@ class S33BusinessJourneyTest {
             "S33_RECORDING_TRANSIENT",
             "S33 录音清单瞬时失败",
         )
-        clickText("查看录音")
+        compose.onNodeWithTag("history.detail.recording", useUnmergedTree = true).performScrollTo().performClick()
         waitForText("S33 录音清单瞬时失败", substring = true)
         fixture.clearFailures()
         clickText("重试")

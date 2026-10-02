@@ -23,8 +23,8 @@ final class VoDogUITests: XCTestCase {
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 20))
 
-        selectTab("通话", in: app)
-        XCTAssertTrue(app.navigationBars["通话"].waitForExistence(timeout: 5))
+        selectTab("电话", in: app)
+        XCTAssertTrue(app.navigationBars["电话"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["没有已分配的 SIM"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["拨打"].isEnabled)
         attachScreenshot(app, name: "calls-empty")
@@ -130,13 +130,14 @@ final class VoDogUITests: XCTestCase {
         selectTab("短信", in: app)
         XCTAssertTrue(app.navigationBars["短信"].waitForExistence(timeout: 5))
 
-        let recipient = app.staticTexts.matching(
-            NSPredicate(format: "label ENDSWITH %@", "0101")
+        let recipient = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "0101")
         ).firstMatch
         XCTAssertTrue(recipient.waitForExistence(timeout: 20), "The expected real SMS conversation was not returned")
-        XCTAssertTrue(app.staticTexts["SIM 1"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["发出"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["已送达"].waitForExistence(timeout: 5))
+        // S95: the thread row is one combined element; its spoken label carries line, direction and state.
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@", "SIM 1", "发出", "已送达"
+        )).firstMatch.waitForExistence(timeout: 5))
 
         let reply = app.staticTexts["CC OK"]
         if reply.waitForExistence(timeout: 8) {
@@ -159,14 +160,14 @@ final class VoDogUITests: XCTestCase {
         selectTab("记录", in: app)
         XCTAssertTrue(app.navigationBars["记录"].waitForExistence(timeout: 5))
 
-        // S22 决策 10：记录页是 全部通话 / 报告 / 拦截记录 三段，报告段自带日期范围菜单与搜索栏。
-        for segment in ["全部通话", "报告", "拦截记录"] {
-            let control = app.buttons[segment]
+        // S22 决策 10 / S95：记录页是 通话 / 转录报告 / 拦截 三段，报告段自带日期范围菜单与搜索栏。
+        for segment in ["通话", "转录报告", "拦截"] {
+            let control = app.segmentedControls["records.tab"].buttons[segment]
             XCTAssertTrue(control.waitForExistence(timeout: 5), "Missing records segment: \(segment)")
             control.tap()
             attachScreenshot(app, name: "records-tab-\(segment)")
         }
-        app.buttons["报告"].tap()
+        app.segmentedControls["records.tab"].buttons["转录报告"].tap()
         XCTAssertTrue(
             app.otherElements["records.reportRange"].waitForExistence(timeout: 5)
                 || app.buttons["records.reportRange"].waitForExistence(timeout: 5),
@@ -176,13 +177,14 @@ final class VoDogUITests: XCTestCase {
 
         selectTab("短信", in: app)
         XCTAssertTrue(app.navigationBars["短信"].waitForExistence(timeout: 5))
-        let recipient = app.staticTexts.matching(
-            NSPredicate(format: "label ENDSWITH %@", "0101")
+        let recipient = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "0101")
         ).firstMatch
         XCTAssertTrue(recipient.waitForExistence(timeout: 20), "The expected real SMS conversation was not returned")
-        XCTAssertTrue(app.staticTexts["SIM 1"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["发出"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["已送达"].waitForExistence(timeout: 5))
+        // S95: the thread row is one combined element; its spoken label carries line, direction and state.
+        XCTAssertTrue(app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@", "SIM 1", "发出", "已送达"
+        )).firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["CC OK"].waitForExistence(timeout: 8), "The real CC OK reply was not returned")
         attachScreenshot(app, name: "reports-candidate-real-sms-read-only")
     }

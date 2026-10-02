@@ -26,7 +26,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.PhonelinkErase
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.SimCard
 import androidx.compose.material.icons.filled.Warning
@@ -76,6 +82,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
@@ -177,9 +186,9 @@ internal fun SectionHeader(title: String, modifier: Modifier = Modifier) {
 internal fun InlineSectionHeader(title: String) {
     Text(
         title,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp),
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MaterialTheme.colorScheme.primary,
     )
 }
 
@@ -218,9 +227,9 @@ internal fun EmptyStateCard(
 /**
  * Filled destructive actions are the deliberate exception to the theme's bright dark-mode error
  * token. That token needs near-black content for contrast; the product rule requires white text on
- * red, so both themes use this deeper red (the light danger token) and retain 5.3:1 contrast.
+ * red, so both themes use Signal `dangerFill` (4.7:1 with white).
  */
-internal val FilledDestructiveRed = Color(0xFFD70015)
+internal val FilledDestructiveRed = SignalLight.dangerFill
 
 @Composable
 internal fun destructiveButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
@@ -255,7 +264,7 @@ internal fun simPickerTitle(sim: ClientSim): String =
 internal fun simPickerDisplayOrder(sims: List<ClientSim>, networkAvailable: Boolean): List<ClientSim> =
     if (networkAvailable) sims.sortedByDescending { it.online } else sims.toList()
 
-/** SIM chips. Green dot = the gateway for that number is online. */
+/** SIM FilterChips. ● = the gateway for that number is online, ○ = offline. */
 @Composable
 /** [allLabel] 非空时在最前面多一个「全部」选项，选中时回调 `""`（全部通话用，不按 SIM 过滤）。 */
 internal fun ClientSimPicker(
@@ -290,54 +299,145 @@ internal fun ClientSimPicker(
                 onClick = { haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); onSelect("") },
                 enabled = enabled,
                 modifier = Modifier.heightIn(min = TouchTarget).testTag("sim.picker.all"),
-                shape = CircleShape,
-                label = { Text(it, style = MaterialTheme.typography.labelLarge) },
+                shape = MaterialTheme.shapes.small,
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = Color.Transparent,
+                    selectedContainerColor = LocalSignal.current.brandSoft,
+                    selectedLabelColor = LocalSignal.current.ink,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = enabled, selected = selectedId.isBlank(),
+                    borderColor = Color.Transparent, selectedBorderColor = Color.Transparent,
+                ),
+                label = { Text(it, style = MaterialTheme.typography.bodyLarge) },
             )
         }
         simPickerDisplayOrder(sims, networkAvailable).forEach { sim ->
             val selected = selectedId == sim.id
-            val accent = simColor(sim, sims)
-            val onAccent = simOnColor()
-            BadgedBox(badge = { CountBadge(badges[sim.id] ?: 0) }) {
+            val online = networkAvailable && sim.online
+            val signal = LocalSignal.current
+            val count = badges[sim.id] ?: 0
+            // Signal FilterChip: ✓ when selected, line block, name, tail digits, status shape (+「离线」).
             FilterChip(
                 selected = selected,
                 onClick = { haptic.performHapticFeedback(HapticFeedbackType.VirtualKey); onSelect(sim.id) },
                 enabled = enabled,
                 modifier = Modifier.heightIn(min = TouchTarget).testTag("sim.picker.${sim.id}"),
-                shape = CircleShape,
+                shape = MaterialTheme.shapes.small,
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = accent,
-                    selectedLabelColor = onAccent,
-                    selectedLeadingIconColor = onAccent,
+                    containerColor = Color.Transparent,
+                    selectedContainerColor = signal.brandSoft,
+                    labelColor = signal.ink,
+                    selectedLabelColor = signal.ink,
+                    selectedLeadingIconColor = signal.ink,
                 ),
-                leadingIcon = {
-                    Box(
-                        Modifier.size(8.dp).background(
-                            if (networkAvailable && sim.online) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline,
-                            CircleShape,
-                        ),
-                    )
-                },
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = enabled, selected = selected,
+                    borderColor = Color.Transparent, selectedBorderColor = Color.Transparent,
+                ),
+                leadingIcon = if (selected) { { Icon(Icons.Filled.Check, null, Modifier.size(18.dp)) } } else null,
                 label = {
-                    Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(simPickerTitle(sim), style = MaterialTheme.typography.labelLarge, color = if (selected) Color.Unspecified else accent)
-                            simAnswerModeBadge(sim.answerMode)?.let { badge ->
-                                Text(
-                                    badge,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.border(1.dp, LocalContentColor.current.copy(alpha = 0.5f), CircleShape).padding(horizontal = 6.dp, vertical = 1.dp),
-                                )
-                            }
+                    Row(
+                        Modifier.semantics(mergeDescendants = true) {
+                            contentDescription = listOfNotNull(
+                                simPickerTitle(sim), sim.phoneLabel, simConnectionLabel(networkAvailable, sim.online),
+                                aiBadgeAccessibilityLabel(sim.answerMode), if (count > 0) "$count 条未读" else null,
+                            ).joinToString("，")
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        LineBlock(simColor(sim, sims))
+                        Text(simPickerTitle(sim), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                        simTailDigits(sim.phoneLabel)?.let {
+                            Text(it, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, color = signal.ink3, maxLines = 1)
                         }
-                        Text(
-                            listOfNotNull(sim.phoneLabel, simConnectionLabel(networkAvailable, sim.online)).joinToString(" · "),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                        AiBadge(sim.answerMode)
+                        StatusShape(if (online) LineStatus.ONLINE else LineStatus.OFFLINE)
+                        if (!online) Text("离线", style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                        if (count > 0) CountBadge(count)
                     }
                 },
             )
+        }
+    }
+}
+
+/**
+ * S95b §A: `✦ AI` pill (aiSoft / ai) for a line whose answer mode is AI; nothing for 人工 or unknown.
+ * [compact] in chips, full (`AI 代接` / `AI · N 秒后`) in settings rows. One TalkBack label for the pill.
+ */
+@Composable
+internal fun AiBadge(mode: String?, timeoutSeconds: Int? = null, compact: Boolean = true, modifier: Modifier = Modifier) {
+    val text = aiBadgeText(mode, timeoutSeconds, compact) ?: return
+    val label = aiBadgeAccessibilityLabel(mode, timeoutSeconds).orEmpty()
+    val signal = LocalSignal.current
+    Row(
+        modifier.heightIn(min = 18.dp).background(signal.aiSoft, CircleShape).padding(horizontal = 6.dp)
+            .clearAndSetSemantics { contentDescription = label },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Icon(Icons.Filled.AutoAwesome, null, Modifier.size(11.dp), tint = signal.ai)
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.22.sp, fontFeatureSettings = "tnum"),
+            color = signal.ai,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+/** Last four digits of a SIM's number for the chip (display only), or null when it has none. */
+internal fun simTailDigits(phoneLabel: String?): String? =
+    phoneLabel?.filter(Char::isDigit)?.takeIf { it.length >= 4 }?.takeLast(4)
+
+/** Signal line color: a rounded square, never a dot (dots are status). */
+@Composable
+internal fun LineBlock(color: Color, size: androidx.compose.ui.unit.Dp = 10.dp) =
+    Box(Modifier.size(size).background(color, androidx.compose.foundation.shape.RoundedCornerShape(3.dp)))
+
+internal enum class LineStatus { ONLINE, OFFLINE, PENDING }
+
+/** Status is a shape, not only a color: ● online, ○ offline, ◐ pending. */
+@Composable
+internal fun StatusShape(status: LineStatus, size: androidx.compose.ui.unit.Dp = 8.dp) {
+    val signal = LocalSignal.current
+    when (status) {
+        LineStatus.ONLINE -> Box(Modifier.size(size).background(signal.call, CircleShape))
+        LineStatus.OFFLINE -> Box(Modifier.size(size).border(1.5.dp, signal.ink3, CircleShape))
+        LineStatus.PENDING -> Box(
+            Modifier.size(size).border(1.5.dp, signal.warn, CircleShape).padding(1.5.dp)
+                .background(Brush.horizontalGradient(0f to signal.warn, 0.5f to signal.warn, 0.5f to Color.Transparent), CircleShape),
+        )
+    }
+}
+
+internal enum class StatusBannerKind { DEVICE_OFFLINE, SERVICE_UNAVAILABLE, LINE_OFFLINE }
+
+/** Signal connection banner: icon + bold title + one sentence. Never replaces the list under it. */
+@Composable
+internal fun StatusBanner(kind: StatusBannerKind, detail: String, modifier: Modifier = Modifier, line: (@Composable () -> Unit)? = null) {
+    val signal = LocalSignal.current
+    val (title, icon) = when (kind) {
+        StatusBannerKind.DEVICE_OFFLINE -> "本机未联网" to Icons.Filled.WifiOff
+        StatusBannerKind.SERVICE_UNAVAILABLE -> "服务连接暂不可用" to Icons.Filled.CloudOff
+        StatusBannerKind.LINE_OFFLINE -> "号码设备离线" to Icons.Filled.PhonelinkErase
+    }
+    val warn = kind == StatusBannerKind.SERVICE_UNAVAILABLE
+    Row(
+        modifier.fillMaxWidth().background(if (warn) signal.warnSoft else signal.surface2, androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp).semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, null, Modifier.size(22.dp), tint = if (warn) signal.warn else signal.ink2)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = if (warn) signal.warn else signal.ink)
+                line?.invoke()
             }
+            Text(detail, style = MaterialTheme.typography.bodyMedium, color = if (warn) signal.warn else signal.ink2)
         }
     }
 }
@@ -388,7 +488,7 @@ internal fun SimIdentityCard(sim: ClientSim) {
             when (sim.embedded) { true -> "eSIM"; false -> "实体 SIM"; null -> null },
         ).joinToString(" · "),
     ) {
-        Text(sim.gatewayFullLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(simDeviceLabel(sim), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             simConnectionLabel(networkAvailable, sim.online),
             color = if (networkAvailable && sim.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,

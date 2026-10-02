@@ -14,14 +14,14 @@ struct MainView: View {
         CallsView { callTab in
             TabView(selection: $navigation.tab) {
                 // S20 decision 8: a call this device is holding stays visible from the other tabs.
-                callTab.tabItem { Label("通话", systemImage: "phone.fill") }.tag(AppTab.calls)
+                callTab.tabItem { Label("电话", systemImage: "phone") }.tag(AppTab.calls)
                     // S67: pending calls; a held call still marks the tab (S20 decision 8).
                     .badge(BadgeLabelPolicy.text(max(badges.counts.calls, media.callID == nil ? 0 : 1)))
-                MessagesView().tabItem { Label("短信", systemImage: "message.fill") }.tag(AppTab.messages)
+                MessagesView().tabItem { Label("短信", systemImage: "message") }.tag(AppTab.messages)
                     .badge(BadgeLabelPolicy.text(badges.counts.sms))
                 RecordsView().tabItem { Label("记录", systemImage: "clock.arrow.circlepath") }.tag(AppTab.records)
-                ContactsView().tabItem { Label("通讯录", systemImage: "person.crop.circle") }.tag(AppTab.contacts)
-                SettingsView().tabItem { Label("设置", systemImage: "gearshape.fill") }.tag(AppTab.settings)
+                ContactsView().tabItem { Label("通讯录", systemImage: "person") }.tag(AppTab.contacts)
+                SettingsView().tabItem { Label("设置", systemImage: "slider.horizontal.3") }.tag(AppTab.settings)
             }
         }
         .environment(availability)

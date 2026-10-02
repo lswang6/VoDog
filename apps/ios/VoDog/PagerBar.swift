@@ -130,6 +130,7 @@ struct PageJumpSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Group {
                 Section {
                     TextField(RecordsPagingPolicy.jumpFieldPrompt, value: $value, format: .number)
                         .keyboardType(.numberPad)
@@ -140,7 +141,10 @@ struct PageJumpSheet: View {
                 } footer: {
                     Text("共 \(totalPages ?? current) 页")
                 }
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .navigationTitle(RecordsPagingPolicy.jumpLabel)
             .navigationBarTitleDisplayMode(.inline)
             // 页码 is a `.numberPad`: no return key, and the sheet is only 240 pt tall, so the keyboard covers

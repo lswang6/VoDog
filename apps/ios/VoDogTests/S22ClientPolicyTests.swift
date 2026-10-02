@@ -204,7 +204,7 @@ final class S22ClientPolicyTests: XCTestCase {
     }
 
     func testRecordsTabsAndSearchPromptMatchTheThreeEndContract() {
-        XCTAssertEqual(RecordsTab.allCases.map(\.title), ["全部通话", "报告", "拦截记录"])
+        XCTAssertEqual(RecordsTab.allCases.map(\.title), ["通话", "转录报告", "拦截"])
         XCTAssertEqual(RecordsTab.allCases.first, .calls)
         XCTAssertEqual(RecordSearchPolicy.searchPrompt, "搜索姓名或号码")
         XCTAssertEqual(RecordSearchPolicy.debounce, .milliseconds(350))

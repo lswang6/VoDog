@@ -49,6 +49,8 @@ const settingsFrom=(sim:Sim):SettingsDraft=>({simId:sim.id,baseVersion:sim.setti
 const settingsFromSnapshot=(simId:string,value:SimSettingsSnapshot):SettingsDraft=>({simId,baseVersion:value.version,mode:value.mode,seconds:value.timeoutSeconds||45,baseMode:value.mode,baseSeconds:value.timeoutSeconds||45,dirty:false,blocked:false,message:''});
 const settingsDirty=(next:SettingsDraft):SettingsDraft=>({...next,dirty:next.mode!==next.baseMode||next.seconds!==next.baseSeconds});
 
+/** Same field values as before (normal / timeout_ai / ai); only the presentation is three selectable cards. */
+const ANSWER_MODES:[string,string,string][]=[['normal','我自己接','人工接听，来电在已登录的设备上响铃'],['timeout_ai','先响铃，无人接听再交给 AI','超时转 AI'],['ai','AI 立即代接','不响铃，事后看摘要']];
 export function SimReceptionForm({sim,busy,status,onSubmit,loadLatest,onDirtyChange}:{
  sim:Sim;busy:boolean;status:string;onDirtyChange?:(dirty:boolean)=>void;
  onSubmit:(mode:string,seconds:number,expectedVersion:number)=>Promise<SimSettingsSnapshot|null>;
@@ -73,9 +75,9 @@ export function SimReceptionForm({sim,busy,status,onSubmit,loadLatest,onDirtyCha
  async function reload(){if(busy||pending)return;const simId=draft.simId;setPending(true);try{const latest=await loadLatest();if(latestSimId.current===simId)setDraft(settingsFromSnapshot(simId,latest));}catch{if(latestSimId.current===simId)setDraft(current=>({...current,blocked:true,message:'暂时无法读取服务器最新接听设置；草稿和原版本已保留，请重试。'}));}finally{setPending(false);}}
  async function submit(){if(busy||pending||draft.blocked||!available.includes(draft.mode))return;const simId=draft.simId;setPending(true);const snapshot={mode:draft.mode,seconds:draft.seconds,version:draft.baseVersion};try{const saved=await onSubmit(snapshot.mode,snapshot.seconds,snapshot.version);if(latestSimId.current!==simId)return;if(saved){const next=settingsFromSnapshot(simId,saved);setDraft(latestServerVersion.current>saved.version?{...next,blocked:true,message:'接听设置已保存，但服务器随后又有更新；请载入最新内容后再编辑。'}:next);}else setDraft(current=>({...current,blocked:true,message:'接听设置未保存。草稿和原版本已保留，请载入服务器最新内容后重试。'}));}catch{if(latestSimId.current===simId)setDraft(current=>({...current,blocked:true,message:'接听设置未保存。草稿和原版本已保留，请载入服务器最新内容后重试。'}));}finally{setPending(false);}}
  const locked=busy||pending;
- return <><h2>接听方式</h2><p className="muted">为当前 SIM 设置接听方式；设备确认后生效。</p><p role="status">{status}</p>
+ return <><h2>来电怎么接</h2><p className="muted">为当前 SIM 设置接听方式；设备确认后生效。</p><p role="status">{status}</p>
   <form onSubmit={event=>{event.preventDefault();void submit();}}>
-   <label>接听模式<select value={draft.mode} disabled={locked} onChange={event=>setDraft(current=>settingsDirty({...current,mode:event.target.value}))}><option value="normal">人工接听</option><option value="ai" disabled={!available.includes('ai')}>AI 即接</option><option value="timeout_ai" disabled={!available.includes('timeout_ai')}>超时转 AI</option></select></label>
+   <div className="answer-modes" role="radiogroup" aria-label="接听模式">{ANSWER_MODES.map(([value,title,detail])=><label key={value} className={`answer-card${draft.mode===value?' selected':''}`}><input type="radio" name={`answer-mode-${sim.id}`} value={value} checked={draft.mode===value} disabled={locked||(value!=='normal'&&!available.includes(value))} onChange={event=>setDraft(current=>settingsDirty({...current,mode:event.target.value}))}/><strong>{title}</strong><small>{value==='timeout_ai'&&draft.mode==='timeout_ai'?`等待 ${draft.seconds} 秒`:detail}</small></label>)}</div>
    {draft.mode==='timeout_ai'&&<label>等待秒数<input type="number" min={10} max={120} value={draft.seconds} disabled={locked} onChange={event=>setDraft(current=>settingsDirty({...current,seconds:Number(event.target.value)}))}/></label>}
    {(!available.includes('ai')||!available.includes('timeout_ai'))&&<p className="note">{sim.settings.aiUnavailableReason||'AI 接听尚未开放'}</p>}
    {draft.message&&<div className="note" role="status"><p>{draft.message}</p><button type="button" className="passkey" disabled={locked} onClick={()=>void reload()}>载入最新接听设置（替换当前草稿）</button></div>}

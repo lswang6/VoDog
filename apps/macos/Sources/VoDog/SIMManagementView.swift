@@ -37,8 +37,6 @@ struct SIMManagementView: View {
     @State private var deletingProfile: ESIMProfile?
     @State private var isInternetModulePopoverPresented = false
     @State private var isConfirmingCloseAllCellularNetworks = false
-    @State private var overviewThroughput = NetworkThroughput.zero
-    @State private var previousOverviewCounters: NetworkInterfaceByteCounters?
     @FocusState private var listFocused: Bool
 
     var body: some View {
@@ -67,14 +65,6 @@ struct SIMManagementView: View {
         }
         .onChange(of: selectedEUICC.cardKind) { _, cardKind in
             if cardKind != .eUICC, selection == .esim { selection = .sim }
-        }
-        .task(id: selectedModuleID) {
-            previousOverviewCounters = nil
-            overviewThroughput = .zero
-            while !Task.isCancelled {
-                refreshOverviewThroughput()
-                try? await Task.sleep(for: .seconds(1))
-            }
         }
         .sheet(isPresented: $showingAddESIM) {
             AddESIMProfileSheet { activationCode, confirmationCode in
@@ -130,7 +120,7 @@ struct SIMManagementView: View {
                 appState.setIncomingCallsEnabled(enabled, moduleID: selectedModuleID)
             }
         } message: {
-            Text(L10n.tr("VoDog 会在%@中写入并回读 IMS=%lld，校验成功后再重启模块。蜂窝网络将短暂中断。", selectedModule?.displayName ?? L10n.tr("当前模组"), Int64(pendingIncomingCallsEnabled == true ? 1 : 0)))
+            Text(L10n.tr("VoDog 会在%@中更改接收来电设置并回读校验，成功后再重启模块。蜂窝网络将短暂中断。", selectedModule?.displayName ?? L10n.tr("当前模组")))
         }
     }
 
@@ -138,7 +128,7 @@ struct SIMManagementView: View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("SIM 管理")
+                    Text(L10n.tr("SIM 与 eSIM"))
                         .font(.title2.weight(.bold))
                     Text(L10n.tr("%lld 个模组已连接", Int64(connectedModuleCount)))
                         .font(.callout)
@@ -494,10 +484,7 @@ struct SIMManagementView: View {
             VStack(spacing: 12) {
                 LazyVStack(spacing: 14) {
                     if selection == .overview {
-                        overviewConnectionCard
-                        overviewCommunicationCard
-                        overviewSIMCard
-                        overviewDeviceInformationCard
+                        overviewGrid
                     } else if selection == .sim {
                         simConnectionCard
                         basicInformationCard
@@ -732,14 +719,7 @@ struct SIMManagementView: View {
 
     private func esimProfileRow(_ profile: ESIMProfile) -> some View {
         HStack(spacing: 13) {
-            Image(systemName: profile.isEnabled ? "antenna.radiowaves.left.and.right" : "simcard")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(profile.isEnabled ? Color.green : Color.secondary)
-                .frame(width: 36, height: 36)
-                .background(
-                    (profile.isEnabled ? Color.green : Color.secondary).opacity(0.10),
-                    in: Circle()
-                )
+            LineStatusShape(status: profile.isEnabled ? .online : .offline, size: 8)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(profile.displayName)
@@ -747,7 +727,7 @@ struct SIMManagementView: View {
                 Text(profile.serviceProviderName ?? L10n.tr("运营商信息未提供"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(maskedIdentifier(profile.iccid, prefixCount: 4, suffixCount: 4))
+                Text(L10n.tr("ICCID 尾号 %@", String(profile.iccid.suffix(4))))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -757,10 +737,10 @@ struct SIMManagementView: View {
             if profile.isEnabled {
                 Text("使用中")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Signal.call)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(Color.green.opacity(0.10), in: Capsule())
+                    .background(Signal.callSoft, in: Capsule())
             } else {
                 Text("已停用")
                     .font(.caption2.weight(.semibold))
@@ -791,140 +771,105 @@ struct SIMManagementView: View {
         .padding(.vertical, 11)
     }
 
-    private var overviewConnectionCard: some View {
+    // MARK: Signal overview (spec 01 §6 设备与 SIM)
+
+    /// Two columns when the detail is wide, one otherwise.
+    private var overviewGrid: some View {
         ViewThatFits(in: .horizontal) {
-            overviewConnectionRegularLayout
-            overviewConnectionCompactLayout
+            HStack(alignment: .top, spacing: 22) {
+                VStack(spacing: 22) { overviewLineCard; overviewServicesGroup }
+                    .frame(minWidth: 380)
+                VStack(spacing: 22) { overviewAccountColumn }
+                    .frame(minWidth: 300)
+            }
+            VStack(spacing: 22) {
+                overviewLineCard
+                overviewServicesGroup
+                overviewAccountColumn
+            }
+        }
+    }
+
+    private var selectedAccountSettings: VoDogSIMSettings? { appState.accountSIM(for: selectedModule?.id)?.settings }
+
+    private var overviewLineCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 14) {
+                Image(systemName: "simcard")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Signal.ink2)
+                    .frame(width: 44, height: 44)
+                    .background(Signal.surface3, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        LineBlock(color: appState.lineColor(for: selectedModule?.id), size: 10)
+                        Text(verbatim: appState.lineName(for: selectedModule?.id)
+                            ?? selectedModule?.localizedDisplayName ?? L10n.tr("模组"))
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(1)
+                        AiBadge(settings: selectedAccountSettings, full: true)
+                        LineStatusShape(status: selectedModem.isConnected ? .online : .offline)
+                    }
+                    Text(verbatim: [selectedModule?.localizedDisplayName, moduleStatusText]
+                        .compactMap { $0 }.joined(separator: " · "))
+                        .font(.callout)
+                        .foregroundStyle(Signal.ink3)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                simPINActionButton
+                SignalBars(bars: hasSelectedSignalInformation ? selectedModem.signalBars : 0, barWidth: 5, height: 20)
+                    .help(selectedSignalDescription)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel([selectedModule?.accessibilitySummary ?? L10n.tr("模组详情"),
+                                 AiBadge.accessibilityText(selectedAccountSettings)].compactMap { $0 }.joined(separator: ", "))
+
+            HStack(alignment: .top, spacing: 12) {
+                overviewMetric(L10n.tr("运营商"), selectedModule?.carrierName ?? L10n.tr("尚未读取"))
+                overviewMetric(L10n.tr("网络"), selectedModule?.technologyName ?? L10n.tr("尚未读取"))
+                overviewMetric(L10n.tr("信号"), selectedModem.signalDBm.map { "\($0) dBm" } ?? "—", numeric: true)
+                overviewMetric(L10n.tr("号码"), displayedPhoneNumber, numeric: true)
+            }
+        }
+        .signalCard(padding: 18)
+    }
+
+    private func overviewMetric(_ title: String, _ value: String, numeric: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(verbatim: title)
+                .font(.caption)
+                .foregroundStyle(Signal.ink3)
+            Text(verbatim: value)
+                .font(numeric ? .body.weight(.semibold).monospacedDigit() : .body.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .adaptiveGlassCard()
     }
 
-    private var overviewConnectionRegularLayout: some View {
-        HStack(spacing: 18) {
-            HStack(spacing: 18) {
-                overviewModuleIcon
-                    .frame(width: 36, height: 68)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("蜂窝连接")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text(networkStateText)
-                        .font(.title2.weight(.bold))
-                    Text(overviewConnectionDetail)
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            .frame(minWidth: 170, maxWidth: .infinity, alignment: .leading)
-
-            Divider().frame(height: 66)
-
-            VStack(spacing: 8) {
-                overviewSpeedMetric(
-                    title: NetworkSpeedFormatter.menuBarLines(overviewThroughput).download,
-                    systemImage: "arrow.down",
-                    tint: .blue
-                )
-                overviewSpeedMetric(
-                    title: NetworkSpeedFormatter.menuBarLines(overviewThroughput).upload,
-                    systemImage: "arrow.up",
-                    tint: .green
-                )
-            }
-            .frame(minWidth: 130, maxWidth: .infinity, alignment: .center)
-            .layoutPriority(1)
-
-            Divider().frame(height: 66)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("蜂窝网络模式")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                CellularNetworkModeMenu(
-                    moduleID: selectedModuleID ?? .compatibilityPrimary,
-                    mode: overviewCellularNetworkMode,
-                    isChanging: appState.isChangingNetwork,
-                    isEnabled: canChangeOverviewCellularData
-                )
-                .accessibilityIdentifier("SIMManagementOverviewCellularNetworkModeMenu")
-
-                Text(overviewCellularNetworkMode.localizedDetail)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            .frame(width: 190, alignment: .leading)
-        }
-        // Preserve the natural minimum width so ViewThatFits selects the
-        // compact layout instead of letting this row overflow a narrow detail.
-        .fixedSize(horizontal: true, vertical: false)
+    private func overviewGroupTitle(_ title: String) -> some View {
+        Text(verbatim: title)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Signal.ink3)
+            .padding(.leading, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var overviewConnectionCompactLayout: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                overviewModuleIcon
-                    .frame(width: 28, height: 52)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("蜂窝连接")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(overviewConnectionDetail)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .layoutPriority(1)
-
-                Spacer(minLength: 8)
-
-                Text(networkStateText)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(networkStateColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(networkStateColor.opacity(0.10), in: Capsule())
-                    .fixedSize()
-            }
-
-            Divider()
-
-            HStack(spacing: 8) {
-                overviewSpeedMetric(
-                    title: NetworkSpeedFormatter.menuBarLines(overviewThroughput).download,
-                    systemImage: "arrow.down",
-                    tint: .blue
-                )
-                overviewSpeedMetric(
-                    title: NetworkSpeedFormatter.menuBarLines(overviewThroughput).upload,
-                    systemImage: "arrow.up",
-                    tint: .green
-                )
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 10) {
-                    Text("蜂窝网络模式")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
+    private var overviewServicesGroup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            overviewGroupTitle(L10n.tr("通信服务"))
+            VStack(spacing: 0) {
+                incomingCallsRow
+                Divider().overlay(Signal.line)
+                overviewStatusRow(L10n.tr("短信服务"), detail: nil, value: messageServiceText, color: messageServiceColor)
+                Divider().overlay(Signal.line)
+                overviewStatusRow(L10n.tr("蜂窝数据"), detail: networkDetailText, value: networkStateText,
+                                  color: networkStateColor)
+                Divider().overlay(Signal.line)
+                HStack(spacing: 12) {
+                    Text(L10n.tr("蜂窝网络模式"))
                     Spacer(minLength: 8)
-
                     CellularNetworkModeMenu(
                         moduleID: selectedModuleID ?? .compatibilityPrimary,
                         mode: overviewCellularNetworkMode,
@@ -933,92 +878,47 @@ struct SIMManagementView: View {
                     )
                     .accessibilityIdentifier("SIMManagementOverviewCellularNetworkModeMenu")
                 }
-
-                Text(overviewCellularNetworkMode.localizedDetail)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: 44)
             }
+            .padding(.horizontal, 14)
+            .signalCard(cornerRadius: 12, padding: 0)
         }
+    }
+
+    private func overviewStatusRow(_ title: String, detail: String?, value: String, color: Color) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: title)
+                if let detail {
+                    Text(verbatim: detail)
+                        .font(.caption)
+                        .foregroundStyle(Signal.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(verbatim: value)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(color)
+        }
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
     }
 
     @ViewBuilder
-    private var overviewModuleIcon: some View {
-        if let url = Bundle.main.url(
-            forResource: "celldock-module-vertical",
-            withExtension: "svg"
-        ), let image = NSImage(contentsOf: url) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .accessibilityHidden(true)
-        } else {
-            Image(systemName: "externaldrive.fill")
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(networkStateColor)
-                .padding(7)
-                .accessibilityHidden(true)
+    private var overviewAccountColumn: some View {
+        if selectedEUICC.cardKind == .eUICC {
+            esimProfilesCard
         }
-    }
-
-    private func overviewSpeedMetric(
-        title: String,
-        systemImage: String,
-        tint: Color
-    ) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(tint)
-                .frame(width: 16)
-            Text(title.replacingOccurrences(of: systemImage == "arrow.down" ? "↓ " : "↑ ", with: ""))
-                .font(.callout.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.primary)
-                .lineLimit(1)
+        if let runtime = appState.gatewayRuntime(for: selectedModuleID) {
+            SIMGatewayStatusGroup(runtime: runtime, sim: appState.accountSIM(for: selectedModuleID),
+                                  lineName: appState.lineName(for: selectedModuleID))
+            Label(L10n.tr("拔出模组或退出应用，此号码会显示为『号码设备离线』"), systemImage: "exclamationmark.circle")
+                .font(.callout)
+                .foregroundStyle(Signal.ink3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .signalCard(cornerRadius: 12, padding: 13)
         }
-        .padding(.horizontal, 10)
-        .frame(minWidth: 110, maxWidth: .infinity, minHeight: 30, alignment: .leading)
-        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
-        .accessibilityElement(children: .combine)
-    }
-
-    private var overviewCommunicationCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Label("通信服务", systemImage: "antenna.radiowaves.left.and.right")
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .padding(.bottom, 10)
-
-            Divider()
-            incomingCallsRow
-            Divider()
-            HStack(spacing: 14) {
-                Image(systemName: "message.fill")
-                    .foregroundStyle(messageServiceColor)
-                    .frame(width: 38, height: 38)
-                    .background(messageServiceColor.opacity(0.10), in: Circle())
-                Text("短信服务").font(.headline)
-                Spacer()
-                Text(messageServiceText)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(messageServiceColor)
-            }
-            .padding(.vertical, 12)
-
-            Label(
-                L10n.tr("更改接收来电设置后将重启%@。", selectedModule?.displayName ?? L10n.tr("当前模组")),
-                systemImage: "info.circle"
-            )
-            .font(.caption)
-            .foregroundStyle(.blue)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .adaptiveGlassCard()
     }
 
     @ViewBuilder
@@ -1038,110 +938,6 @@ struct SIMManagementView: View {
         }
     }
 
-    private var overviewSIMCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("SIM 卡", systemImage: "simcard.fill")
-                    .font(.headline)
-                Spacer()
-                simPINActionButton
-                Button("查看详情") { selection = .sim }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-            }
-
-            Divider()
-
-            HStack(spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(selectedModule?.carrierName ?? L10n.tr("运营商未识别"))
-                        .font(.title3.weight(.semibold))
-                    Text(displayedPhoneNumber)
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 20)
-
-                HStack(spacing: 8) {
-                    overviewTag(selectedModule?.technologyName ?? L10n.tr("尚未读取"))
-                    overviewTag("SIM 1")
-                    overviewTag("ICCID \(quickICCIDValue)")
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .adaptiveGlassCard()
-    }
-
-    private func overviewTag(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-    }
-
-    private var overviewDeviceInformationCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("设备信息", systemImage: "info.circle")
-                .font(.headline)
-
-            HStack(spacing: 0) {
-                overviewDeviceMetric(
-                    icon: "cable.connector",
-                    title: "USB",
-                    value: selectedModem.usbIdentity ?? L10n.tr("尚未读取")
-                )
-                Divider().frame(height: 42)
-                overviewDeviceMetric(
-                    icon: "globe",
-                    title: "联网模式",
-                    value: selectedModem.usbNetMode == 1 ? "CDC‑ECM" : L10n.tr("需要配置")
-                )
-                Divider().frame(height: 42)
-                overviewDeviceMetric(
-                    icon: "terminal",
-                    title: "AT 接口",
-                    value: selectedModem.isConnected ? L10n.tr("已连接") : L10n.tr("未连接"),
-                    valueColor: selectedModem.isConnected ? .green : .secondary
-                )
-                Divider().frame(height: 42)
-                overviewDeviceMetric(
-                    icon: "cpu",
-                    title: "模块状态",
-                    value: moduleStatusText,
-                    valueColor: moduleStatusColor
-                )
-            }
-        }
-        .adaptiveGlassCard()
-    }
-
-    private func overviewDeviceMetric(
-        icon: String,
-        title: String,
-        value: String,
-        valueColor: Color = .secondary
-    ) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.blue)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.callout.weight(.medium))
-                Text(value)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(valueColor)
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-    }
-
     private var overviewCellularNetworkMode: CellularNetworkMode {
         selectedNetworkMode
     }
@@ -1150,31 +946,8 @@ struct SIMManagementView: View {
         selectedModule?.isDataEligible == true && !appState.isChangingNetwork
     }
 
-    private var overviewConnectionDetail: String {
-        [selectedModule?.technologyName, selectedNetwork.ipv4Address]
-            .compactMap { $0 }
-            .joined(separator: " · ")
-    }
-
     private var messageServiceColor: Color {
         selectedModem.simReady && selectedModem.registrationState.hasService ? .green : .secondary
-    }
-
-    private func refreshOverviewThroughput() {
-        guard let interfaceName = selectedNetwork.bsdName,
-              let current = NetworkInterfaceCounterReader.read(interfaceName: interfaceName) else {
-            previousOverviewCounters = nil
-            overviewThroughput = .zero
-            return
-        }
-        if let previousOverviewCounters,
-           let rates = NetworkThroughputCalculator.rates(
-               previous: previousOverviewCounters,
-               current: current
-           ) {
-            overviewThroughput = rates
-        }
-        previousOverviewCounters = current
     }
 
     private var cellularServiceCard: some View {
@@ -1301,16 +1074,9 @@ struct SIMManagementView: View {
 
     private var incomingCallsRow: some View {
         HStack(alignment: .center, spacing: 14) {
-            Image(systemName: "phone.arrow.down.left")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(incomingCallStateColor)
-                .frame(width: 38, height: 38)
-                .background(incomingCallStateColor.opacity(0.10), in: Circle())
-
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
                     Text("接收来电")
-                        .font(.headline)
 
                     Image(systemName: "info.circle")
                         .font(.system(size: 12, weight: .medium))
@@ -1377,7 +1143,7 @@ struct SIMManagementView: View {
         if appState.isChangingIncomingCallSetting { return L10n.tr("更新中") }
         guard selectedModem.isConnected else { return L10n.tr("等待模块") }
         guard let mode = selectedModem.imsMode else { return L10n.tr("读取中") }
-        return "IMS=\(mode)"
+        return mode == 0 ? L10n.tr("已关闭") : L10n.tr("已开启")
     }
 
     private var incomingCallStateColor: Color {
@@ -1794,7 +1560,7 @@ private struct SIMModuleSidebarRow: View {
                     Spacer(minLength: 4)
 
                     Circle()
-                        .fill(statusColor)
+                        .selectionTint(statusColor)
                         .frame(width: 8, height: 8)
                         .accessibilityHidden(true)
                 }
@@ -1867,11 +1633,13 @@ private struct SIMModuleSidebarRow: View {
 }
 
 private struct ModuleRoleBadge: View {
+    @Environment(\.signalRowSelected) private var rowSelected
     let title: String
     let tint: Color
 
     var body: some View {
-        Text(L10n.tr(title))
+        let tint = rowSelected ? Signal.onBrand : tint
+        return Text(L10n.tr(title))
             .font(.caption2.weight(.semibold))
             .foregroundStyle(tint)
             .padding(.horizontal, 7)
@@ -1886,6 +1654,7 @@ private struct ModuleRoleBadge: View {
 }
 
 private struct SIMSignalBars: View {
+    @Environment(\.signalRowSelected) private var rowSelected
     let bars: Int
     let active: Bool
     var tint: Color = .secondary
@@ -1904,7 +1673,75 @@ private struct SIMSignalBars: View {
     }
 
     private func barColor(index: Int) -> Color {
-        guard active else { return Color.secondary.opacity(0.22) }
+        let tint = rowSelected ? Signal.onBrand : tint
+        guard active else { return (rowSelected ? Signal.onBrand : Color.secondary).opacity(0.22) }
         return index < bars ? tint : tint.opacity(0.22)
+    }
+}
+
+/// 「VoDog 网关」: pairing state of this module's gateway and the SIM settings version (existing data only).
+private struct SIMGatewayStatusGroup: View {
+    @ObservedObject var runtime: GatewayRuntime
+    let sim: VoDogSIM?
+    let lineName: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.tr("VoDog 网关"))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Signal.ink3)
+                .padding(.leading, 4)
+            VStack(spacing: 0) {
+                row(L10n.tr("配对状态"),
+                    detail: lineName.map { L10n.tr("本 Mac 作为 %@ 的网关", $0) },
+                    value: pairing.text, color: pairing.color)
+                if let settings = sim?.settings {
+                    Divider().overlay(Signal.line)
+                    let applied = settings.appliedVersion == settings.version
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.tr("接听方式"))
+                        }
+                        Spacer(minLength: 8)
+                        if settings.mode == VoDogReceptionMode.normal.rawValue {
+                            Text(VoDogReceptionMode.normal.title).font(.callout).foregroundStyle(Signal.ink2)
+                        } else {
+                            AiBadge(settings: settings, full: true)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .frame(minHeight: 44)
+                    Divider().overlay(Signal.line)
+                    row(L10n.tr("设置版本"), detail: L10n.tr("服务器下发的 SIM 设置"),
+                        value: applied ? L10n.tr("v%lld 已应用", Int64(settings.version))
+                            : L10n.tr("v%lld 待设备应用", Int64(settings.version)),
+                        color: applied ? Signal.ink2 : Signal.warn)
+                }
+            }
+            .padding(.horizontal, 14)
+            .signalCard(cornerRadius: 12, padding: 0)
+        }
+    }
+
+    private var pairing: (text: String, color: Color) {
+        guard runtime.credentials != nil else { return (L10n.tr("未配对"), Signal.ink3) }
+        return runtime.isOnline ? (L10n.tr("已配对 · 在线"), Signal.call) : (L10n.tr("已配对 · 离线"), Signal.ink3)
+    }
+
+    private func row(_ title: String, detail: String?, value: String, color: Color) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: title)
+                if let detail {
+                    Text(verbatim: detail).font(.caption).foregroundStyle(Signal.ink3)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(verbatim: value)
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .foregroundStyle(color)
+        }
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
     }
 }

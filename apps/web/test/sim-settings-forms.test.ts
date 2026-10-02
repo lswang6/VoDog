@@ -9,6 +9,9 @@ import type {Sim} from '../src/call-history-panel.tsx';
 
 function textOf(node: unknown): string {if(typeof node==='string'||typeof node==='number')return String(node);if(Array.isArray(node))return node.map(textOf).join('');if(!node||typeof node!=='object')return '';const value=node as {children?:unknown[];props?:{children?:unknown}};return textOf(value.children??value.props?.children);}
 function input(renderer:ReactTestRenderer,label:string){const labels=renderer.root.findAll(node=>node.type==='label'&&textOf(node).includes(label));return labels[0]!.findAll(node=>node.type==='input'||node.type==='select')[0]!;}
+function radios(renderer:ReactTestRenderer){return renderer.root.findAll(node=>node.type==='input'&&node.props.type==='radio');}
+/** 接听模式 radiogroup: same field values, three cards. */
+function mode(renderer:ReactTestRenderer){const group=renderer.root.find(node=>node.props.role==='radiogroup'&&node.props['aria-label']==='接听模式');const all=radios(renderer);return {value:all.find(node=>node.props.checked)?.props.value,disabled:all.every(node=>node.props.disabled),choose:(value:string)=>all.find(node=>node.props.value===value)!.props.onChange({target:{value}}),group};}
 function button(renderer:ReactTestRenderer,label:string){return renderer.root.findAll(node=>node.type==='button'&&textOf(node).trim()===label)[0]!;}
 let server:ViteDevServer|undefined;
 async function components(){const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');if(!server)server=await createServer({root,server:{middlewareMode:true,hmr:false},appType:'custom'});(globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;return await server.ssrLoadModule('/src/sim-settings-forms.tsx') as typeof import('../src/sim-settings-forms.tsx');}
@@ -38,13 +41,13 @@ test('reception setting polling preserves a dirty mode and reloads from a fresh 
  const view=(value:Sim)=>React.createElement(SimReceptionForm,{sim:value,busy:false,status:'设置已应用',onSubmit:async(...args)=>{submitted.push(args);return {version:9,mode:String(args[0]),timeoutSeconds:Number(args[1])};},loadLatest:async()=>({version:8,mode:'ai',timeoutSeconds:45})});
  try{
   await act(async()=>{renderer=create(view(sim(4,7)));});
-  await act(async()=>input(renderer!,'接听模式').props.onChange({target:{value:'timeout_ai'}}));
+  await act(async()=>mode(renderer!).choose('timeout_ai'));
   await act(async()=>renderer!.update(view(sim(4,8,'家庭卡','ai'))));
-  assert.equal(input(renderer!,'接听模式').props.value,'timeout_ai');
+  assert.equal(mode(renderer!).value,'timeout_ai');
   assert.match(textOf(renderer!.toJSON()),/草稿和原版本已保留/);
   assert.equal(button(renderer!,'保存接听设置').props.disabled,true);
   await act(async()=>{button(renderer!,'载入最新接听设置（替换当前草稿）').props.onClick();await new Promise(resolve=>setImmediate(resolve));});
-  assert.equal(input(renderer!,'接听模式').props.value,'ai');
+  assert.equal(mode(renderer!).value,'ai');
   await act(async()=>renderer!.root.findByType('form').props.onSubmit({preventDefault(){}}));
   assert.deepEqual(submitted,[['ai',45,8]]);
  }finally{if(renderer)await act(async()=>renderer!.unmount());}
@@ -91,14 +94,14 @@ test('a deferred reception save locks every field and adopts its returned settin
  const view=(value:Sim)=>React.createElement(SimReceptionForm,{sim:value,busy:false,status:'等待确认',loadLatest:async()=>({version:8,mode:'ai',timeoutSeconds:45}),onSubmit:async()=>saving});
  try{
   await act(async()=>{renderer=create(view(sim(4,7)));});
-  await act(async()=>input(renderer!,'接听模式').props.onChange({target:{value:'timeout_ai'}}));
+  await act(async()=>mode(renderer!).choose('timeout_ai'));
   await act(async()=>input(renderer!,'等待秒数').props.onChange({target:{value:'60'}}));
   await act(async()=>renderer!.root.findByType('form').props.onSubmit({preventDefault(){}}));
-  assert.equal(input(renderer!,'接听模式').props.disabled,true);
+  assert.equal(mode(renderer!).disabled,true);
   assert.equal(input(renderer!,'等待秒数').props.disabled,true);
   await act(async()=>renderer!.update(view(sim(4,8,'家庭卡','ai'))));
   await act(async()=>{resolveSave({version:8,mode:'timeout_ai',timeoutSeconds:60});await saving;await new Promise(resolve=>setImmediate(resolve));});
-  assert.equal(input(renderer!,'接听模式').props.value,'timeout_ai');
+  assert.equal(mode(renderer!).value,'timeout_ai');
   assert.equal(input(renderer!,'等待秒数').props.value,60);
   assert.equal(button(renderer!,'保存接听设置').props.disabled,false);
  }finally{if(renderer)await act(async()=>renderer!.unmount());}
@@ -128,10 +131,10 @@ test('S80 unsaved marker, saving label and discard restore the server values',as
   const reception=(value:Sim)=>React.createElement(SimReceptionForm,{sim:value,busy:false,status:'',loadLatest:async()=>({version:7,mode:'normal',timeoutSeconds:45}),onSubmit:async()=>null});
   await act(async()=>{renderer=create(reception({...sim(4,7),settings:{...sim(4,7).settings,appliedVersion:null}}));});
   assert.match(text(),/设备已应用尚未确认/);
-  await act(async()=>input(renderer!,'接听模式').props.onChange({target:{value:'ai'}}));
+  await act(async()=>mode(renderer!).choose('ai'));
   assert.match(text(),/未保存设置/);
   await act(async()=>button(renderer!,'放弃修改').props.onClick());
-  assert.equal(input(renderer!,'接听模式').props.value,'normal');assert.doesNotMatch(text(),/未保存设置/);
+  assert.equal(mode(renderer!).value,'normal');assert.doesNotMatch(text(),/未保存设置/);
  }finally{if(renderer)await act(async()=>renderer!.unmount());}
 });
 
@@ -152,12 +155,12 @@ test('S80 reception mode changed back to the base value is not dirty',async()=>{
  const {SimReceptionForm}=await components();let renderer:ReactTestRenderer|undefined;const text=()=>textOf(renderer!.toJSON());const reported:boolean[]=[];
  try{
   await act(async()=>{renderer=create(React.createElement(SimReceptionForm,{sim:sim(4,7),busy:false,status:'',onDirtyChange:d=>reported.push(d),loadLatest:async()=>({version:7,mode:'normal',timeoutSeconds:45}),onSubmit:async()=>null}));});
-  await act(async()=>input(renderer!,'接听模式').props.onChange({target:{value:'ai'}}));
+  await act(async()=>mode(renderer!).choose('ai'));
   assert.match(text(),/未保存设置/);assert.equal(reported.at(-1),true);
-  await act(async()=>input(renderer!,'接听模式').props.onChange({target:{value:'normal'}}));
+  await act(async()=>mode(renderer!).choose('normal'));
   assert.doesNotMatch(text(),/未保存设置/);assert.equal(button(renderer!,'放弃修改'),undefined);assert.equal(reported.at(-1),false);
-  await act(async()=>input(renderer!,'接听模式').props.onChange({target:{value:'ai'}}));assert.equal(reported.at(-1),true);
+  await act(async()=>mode(renderer!).choose('ai'));assert.equal(reported.at(-1),true);
   await act(async()=>button(renderer!,'放弃修改').props.onClick());assert.equal(reported.at(-1),false);
-  await act(async()=>input(renderer!,'接听模式').props.onChange({target:{value:'ai'}}));await act(async()=>renderer!.unmount());renderer=undefined;assert.equal(reported.at(-1),false,'unmount reports clean');
+  await act(async()=>mode(renderer!).choose('ai'));await act(async()=>renderer!.unmount());renderer=undefined;assert.equal(reported.at(-1),false,'unmount reports clean');
  }finally{if(renderer)await act(async()=>renderer!.unmount());}
 });

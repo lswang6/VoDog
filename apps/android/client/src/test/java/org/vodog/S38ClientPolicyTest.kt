@@ -90,7 +90,8 @@ class S38ClientPolicyTest {
 
     @Test fun anyOtherReasonStaysVerbatimAndBlanksStayHidden() {
         assertEquals("号码已拦截", failureReasonLabel("number_blocked"))
-        assertEquals("some_future_reason", failureReasonLabel("some_future_reason"))
+        // S95b §C: an unknown raw enum is hidden, never printed verbatim.
+        assertNull(failureReasonLabel("some_future_reason"))
         assertNull(failureReasonLabel(null))
         assertNull(failureReasonLabel(""))
         assertNull(failureReasonLabel("null"))

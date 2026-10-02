@@ -26,8 +26,9 @@ class ContactDisplayTest {
     }
 
     @Test fun `a call with neither number nor name still has a heading`() {
-        assertEquals("call-1", callTitle(JSONObject().put("id", "call-1")))
-        assertEquals("通话", callTitle(JSONObject()))
+        // S95b §C: the internal call id is never used as a heading.
+        assertEquals("号码未知", callTitle(JSONObject().put("id", "call-1")))
+        assertEquals("号码未知", callTitle(JSONObject()))
     }
 
     @Test fun `a name identical to the number is not printed twice`() {
@@ -51,7 +52,7 @@ class ContactDisplayTest {
             null to "19900000201",
             callRowLines(JSONObject().put("remoteNumber", "19900000201").put("contactName", "19900000201")),
         )
-        assertEquals(null to "通话", callRowLines(JSONObject()))
+        assertEquals(null to "号码未知", callRowLines(JSONObject())) // S95b §C: never the internal id
     }
 
     /**

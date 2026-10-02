@@ -45,8 +45,9 @@ class S46CallPresentationPolicyTest {
 
     @Test fun simPickerAnswerModeBadgeFollowsSettingsMode() {
         fun badge(settings: JSONObject?) =
-            simAnswerModeBadge(JSONObject().put("id", "sim-1").apply { settings?.let { put("settings", it) } }.toClientSim().answerMode)
-        assertEquals("人工", badge(JSONObject().put("mode", "normal")))
+            aiBadgeText(JSONObject().put("id", "sim-1").apply { settings?.let { put("settings", it) } }.toClientSim().answerMode)
+        // S95b §A: 人工 shows no badge in chips.
+        assertNull(badge(JSONObject().put("mode", "normal")))
         assertEquals("AI", badge(JSONObject().put("mode", "ai")))
         assertEquals("AI", badge(JSONObject().put("mode", "timeout_ai")))
         assertNull(badge(null))

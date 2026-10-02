@@ -203,7 +203,7 @@ extension View {
     func callerLoginCard() -> some View {
         background {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                .fill(Signal.surface)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)

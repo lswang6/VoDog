@@ -12,7 +12,7 @@ VoDog is a self-hosted calling and SMS system. Connect a compatible rooted Pixel
 
 - **Call remotely:** place and answer cellular calls, reject or end calls, send DTMF, and choose an assigned SIM. Voice travels through authenticated, relay-only WebRTC.
 - **Send and receive SMS:** shared conversations, multipart messages, queued sending, and supported gateway-originated message synchronization. SMS support does not imply RCS or MMS support.
-- **Use four clients:** a responsive Web app, native iOS and Android clients, and a native macOS client that can also host DJI module gateways.
+- **Use four clients:** a responsive Web app, native iOS and Android clients, and a native macOS client that can also host DJI module gateways. One [Signal UI](docs/design/signal/README.md) across Web, iOS, Android and macOS: shared tokens and states, native controls on each platform.
 - **Keep the conversation:** gateway-local capture and server-side recording, resumable original archives, authorized playback, MP3 export, transcripts, and reports where configured.
 - **Let AI answer:** human answering, immediate AI answering, or AI after a timeout, with xAI and Doubao adapters. Provider credentials and a working voice worker are required.
 - **Manage your numbers:** contacts, separate call/SMS blocklists, interception history, SIM labels, gateway readiness, and account-scoped settings.

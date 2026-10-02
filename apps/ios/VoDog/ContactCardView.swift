@@ -200,6 +200,7 @@ struct ContactCardView: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 if availability.reason != nil { Section { NetworkAvailabilityNotice() } }
                 Section { header }
                 if !actions.isEmpty { Section { primaryActions } }
@@ -215,7 +216,10 @@ struct ContactCardView: View {
                             .reportsError(error, screen: "contact_card", site: "card")
                     }
                 }
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .navigationTitle("联系人")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
@@ -585,6 +589,7 @@ struct ContactPickerView: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 NetworkAvailabilityNotice()
                 if !loaded {
                     HStack(spacing: 8) { ProgressView(); Text("正在读取通讯录…") }
@@ -607,7 +612,10 @@ struct ContactPickerView: View {
                         .font(.footnote).foregroundStyle(Color.callerDanger)
                         .reportsError(error, screen: "contact_card", site: "picker")
                 }
+                }
+                .listRowBackground(Signal.surface)
             }
+            .signalList()
             .navigationTitle("选择联系人")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: Binding(get: { query }, set: { if availability.canMutate { query = $0 } }), prompt: "搜索姓名或号码")
