@@ -17,7 +17,7 @@ const TIMELINE = {kind: 'auxiliary', role: 'timeline', name: 'timeline.jsonl', m
 
 type Artifact = {name: string; bytes: number; sha256: string};
 type Manifest = {version: 1; callId: string; nodeId?: string; mediaEpoch?: number; finalizedAt: string; complete: boolean; artifacts: Artifact[]};
-type TrackMetadata = {track: 'remote_original' | 'caller_original'; name: string; mediaType: string; formatVersion: number; speaker: string};
+type TrackMetadata = {track: 'remote_original' | 'caller_original' | 'caller_uplink'; name: string; mediaType: string; formatVersion: number; speaker: string};
 export type FrozenRecording = {manifest: Manifest | PixelRecordingDescriptor; fingerprint: string; tracks: Array<Artifact & TrackMetadata>};
 export type TrackReadRequest = {
   callId: string; snapshotOwnerId: string; manifestFingerprint: string; track: string; name: string;
@@ -71,9 +71,12 @@ export function freezeRecordingManifest(value: unknown, callId: string): FrozenR
     // Hash every reviewed field, including unselected derived tracks, timeline, gaps and identity.
     // Sort object keys to make DB jsonb's key order immaterial on job reload.
     const fingerprint = createHash('sha256').update(canonicalJson(pixel)).digest('hex');
+    // S94: an archive with the owner-side uplink capture transcribes that track for the caller side,
+    // so an owner who picked up on the phone is in the transcript; segments are labelled honestly.
+    const uplink = pixel.uplinkTracks?.[0];
     const tracks = TRACKS.map((track) => {
-      const artifact = pixel.tracks.find((item) => item.track === track.track)!;
-      return {...track, name: `${track.track}.wav`, mediaType: 'audio/wav', formatVersion: pixel.version,
+      const artifact = (uplink && track.track === 'caller_original' ? uplink : pixel.tracks.find((item) => item.track === track.track))!;
+      return {...track, track: artifact.track, name: `${artifact.track}.wav`, mediaType: 'audio/wav', formatVersion: pixel.version,
         bytes: artifact.bytes, sha256: artifact.sha256};
     });
     return {manifest: pixel, fingerprint, tracks};

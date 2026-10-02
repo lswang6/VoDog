@@ -49,7 +49,7 @@ export class RegistryRecordingReader implements RecordingReader {
       ? request.mediaType === 'audio/wav' && [2, 3].includes(request.formatVersion) && typeof request.archiveId === 'string'
       : (request.source === undefined || request.source === 'media') && request.mediaType === 'audio/ogg' && request.formatVersion === 1 && request.archiveId === undefined;
     if (!SHA256_RE.test(request.expectedSha256) || !formatMatches ||
-        !['remote_original', 'caller_original'].includes(request.track) || request.name !== `${request.track}.${pixel ? 'wav' : 'ogg'}`) {
+        !['remote_original', 'caller_original', ...(pixel ? ['caller_uplink'] : [])].includes(request.track) || request.name !== `${request.track}.${pixel ? 'wav' : 'ogg'}`) {
       throw new TranscriptRecordingReaderError('RECORDING_CONTRACT_MISMATCH', 'Recording track request does not match its frozen source format');
     }
     const call = await this.db.query(`SELECT COALESCE(media_node_id,'relay-primary') media_node_id,media_epoch

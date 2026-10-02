@@ -29,6 +29,7 @@ before(async()=>{
   (config as any).MEDIA_NODES_JSON=JSON.stringify([{id:'relay-primary',controlBaseUrl:`http://127.0.0.1:${address.port}`,turnUdpUrl:'turn:turn.test:16801?transport=udp',turnTlsUrl:'turns:turn.test:16802?transport=tcp',mediaSecret:'ai-test-media-secret-at-least-32-chars',turnSecret:'ai-test-turn-secret-at-least-32-chars'}]);
   db=createDb(databaseUrl);await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   await db.query(await readFile(fileURLToPath(new URL('../src/schema.sql',import.meta.url)),'utf8'));
+  await db.query(await readFile(fileURLToPath(new URL('../src/transcription/schema.sql',import.meta.url)),'utf8'));
   const password=await hashPassword('correct horse battery staple');
   userId=(await db.query(`INSERT INTO users(email,password_hash)VALUES('ai-owner@example.test',$1)RETURNING id`,[password])).rows[0].id;
   const gateway=(await db.query(`INSERT INTO gateways(name,control_enabled,telephony_ready,sms_ready,media_ready,last_seen_at)VALUES('ai-gateway',true,true,true,true,now())RETURNING id,device_epoch`)).rows[0];gatewayId=gateway.id;deviceEpoch=Number(gateway.device_epoch);
@@ -54,6 +55,13 @@ async function snapshot(call:{callId:string;deviceCallId:string},state:'ringing'
 }
 async function claimRun(identity=worker){const response=await app.inject({method:'POST',url:'/internal/v1/ai/runs/claim',headers:internal,payload:identity});assert.equal(response.statusCode,200,response.body);return response.json().run;}
 const leaseHeaders=(token:string)=>({...internal,'x-ai-lease-token':token});
+// S94b: list, detail and report must agree on ownerJoinedLocal.
+async function ownerJoinedLocalViews(callId:string){
+  const list=await app.inject({method:'GET',url:'/api/v1/calls?limit=100',headers:auth(userToken)});assert.equal(list.statusCode,200,list.body);
+  const detail=await app.inject({method:'GET',url:`/api/v1/calls/${callId}`,headers:auth(userToken)});assert.equal(detail.statusCode,200,detail.body);
+  const report=await app.inject({method:'GET',url:'/api/v1/reports/calls?period=7d&timeZone=UTC',headers:auth(userToken)});assert.equal(report.statusCode,200,report.body);
+  return[list.json().items.find((c:any)=>c.id===callId)?.ownerJoinedLocal,detail.json().call.ownerJoinedLocal,report.json().items.find((c:any)=>c.callId===callId)?.ownerJoinedLocal];
+}
 async function cleanupCall(callId:string){
   await db.query(`UPDATE call_records SET state='ended',ended_at=now() WHERE id=$1`,[callId]);
   await db.query(`UPDATE ai_call_runs SET state='ended',ended_at=COALESCE(ended_at,now()),lease_hash=NULL,lease_until=NULL,lease_owner=NULL,lease_boot_id=NULL WHERE call_id=$1`,[callId]);
@@ -373,6 +381,42 @@ test('the reconciler hangup path keeps the same identity and accepts the late ba
   await cleanupCall(call.callId);
 });
 
+/**
+ * S94b 死锁. The late transcript batch used to INSERT outside any transaction, so its FK checks took
+ * `FOR KEY SHARE` on the run and then the call — the reverse of the hangup/reconciler order
+ * (gateway → call → run, `FOR UPDATE`). Hold the first two locks of that order, let the batch block,
+ * then take the run lock: in the canonical order the batch simply waits, it never deadlocks.
+ */
+test('a late transcript batch waits behind a hangup that holds gateway and call locks instead of deadlocking',async()=>{
+  await heartbeat();const call=await incoming();await snapshot(call);const run=await claimRun();
+  const hangup=await app.inject({method:'POST',url:`/api/v1/gateway/calls/${call.callId}/events`,headers:auth(deviceToken),payload:{eventId:crypto.randomUUID(),generation:deviceEpoch,state:'ended'}});
+  assert.equal(hangup.statusCode,200,hangup.body);
+  const holder=await db.connect();
+  try{
+    await holder.query('BEGIN');
+    await holder.query(`SELECT id FROM gateways WHERE id=$1 FOR UPDATE`,[gatewayId]);
+    await holder.query(`SELECT id FROM call_records WHERE id=$1 FOR UPDATE`,[call.callId]);
+    const at=new Date().toISOString();
+    const tail=app.inject({method:'POST',url:`/internal/v1/ai/runs/${run.id}/transcript`,headers:leaseHeaders(run.leaseToken),payload:{...worker,items:[{role:'ai',sequence:0,text:'再见',at}]}});
+    // Either the explicit call lock (fixed order) or the INSERT's FK check (old order) must be waiting on us.
+    let blocked=false;
+    for(let attempt=0;attempt<200&&!blocked;attempt++){
+      blocked=Boolean((await db.query(`SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'
+        AND (query ILIKE '%FROM call_records WHERE id=$1 FOR KEY SHARE%' OR query ILIKE '%INSERT INTO ai_run_transcripts%') LIMIT 1`)).rowCount);
+      if(!blocked)await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    assert.ok(blocked,'the transcript batch never blocked on the held call lock');
+    // The hangup path's third lock. With the old run→call order this is where Postgres reported 40P01.
+    await holder.query(`SELECT id FROM ai_call_runs WHERE id=$1 FOR UPDATE`,[run.id]);
+    await holder.query('COMMIT');
+    const response=await tail;
+    assert.equal(response.statusCode,200,response.body);assert.deepEqual(response.json(),{accepted:true,stored:1});
+    // diag is fire-and-forget; give a retry's row time to land so a hidden deadlock cannot pass as a 200.
+    await new Promise(resolve=>setTimeout(resolve,300));
+    assert.equal((await db.query(`SELECT count(*)::int n FROM diag_events WHERE event='db.deadlock_retry' AND fields->>'label'='ai.transcript'`)).rows[0].n,0,'the canonical order must not need the retry');
+  }finally{await holder.query('ROLLBACK').catch(()=>undefined);holder.release();await cleanupCall(call.callId);}
+});
+
 test('the transcript grace window closes after 60 s and never accepts another worker identity',async()=>{
   await heartbeat();const call=await incoming();await snapshot(call);const run=await claimRun();
   const hangup=await app.inject({method:'POST',url:`/api/v1/gateway/calls/${call.callId}/events`,headers:auth(deviceToken),payload:{eventId:crypto.randomUUID(),generation:deviceEpoch,state:'ended'}});
@@ -495,5 +539,68 @@ test('commit-answer and media authorization tolerate the same single unready hea
   const revoked=await app.inject({method:'POST',url:`/internal/v1/ai/runs/${run.id}/media/options`,headers:leaseHeaders(run.leaseToken),payload:{...worker,transport:'udp'}});
   assert.equal(revoked.statusCode,409,revoked.body);assert.equal(revoked.json().error.code,'AI_MEDIA_REVOKED');
   await db.query(`UPDATE gateways SET media_ready=true,media_unready_since=NULL,media_unready_heartbeats=0 WHERE id=$1`,[gatewayId]);
+  await cleanupCall(call.callId);
+});
+
+test('S94 owner-joined ends the AI run as owner_joined, keeps the call active, and is replay-safe',async()=>{
+  await heartbeat();const call=await incoming();await snapshot(call);const run=await claimRun();
+  const committed=await app.inject({method:'POST',url:`/internal/v1/ai/runs/${run.id}/commit-answer`,headers:leaseHeaders(run.leaseToken),payload:worker});assert.equal(committed.statusCode,200,committed.body);
+  const ack=await app.inject({method:'POST',url:`/api/v1/gateway/commands/${committed.json().command.id}/ack`,headers:auth(deviceToken),payload:{generation:deviceEpoch,status:'acked'}});assert.equal(ack.statusCode,200,ack.body);
+  const active=await app.inject({method:'POST',url:`/api/v1/gateway/calls/${call.callId}/events`,headers:auth(deviceToken),payload:{eventId:crypto.randomUUID(),generation:deviceEpoch,state:'active'}});assert.equal(active.statusCode,200,active.body);
+  await snapshot(call,'active');
+  const url=`/api/v1/gateway/calls/${call.callId}/owner-joined`;
+  const payload={eventId:crypto.randomUUID(),generation:deviceEpoch,deviceCallId:call.deviceCallId,telecomCreationTimeMillis:1_790_000_000_000};
+  const stale=await app.inject({method:'POST',url,headers:auth(deviceToken),payload:{...payload,generation:deviceEpoch+1}});assert.equal(stale.statusCode,409);assert.equal(stale.json().error.code,'FENCE_REJECTED');
+  const wrongDevice=await app.inject({method:'POST',url,headers:auth(deviceToken),payload:{...payload,eventId:crypto.randomUUID(),deviceCallId:'other-device-call'}});assert.equal(wrongDevice.statusCode,409);assert.equal(wrongDevice.json().error.code,'DEVICE_CALL_MISMATCH');
+  for(const transient of ['connecting','unknown']){
+    await db.query(`UPDATE call_records SET state=$2::call_state WHERE id=$1`,[call.callId,transient]);
+    const pending=await app.inject({method:'POST',url,headers:auth(deviceToken),payload});assert.equal(pending.statusCode,503,pending.body);assert.equal(pending.json().error.code,'CALL_STATE_PENDING');
+  }
+  assert.equal((await db.query(`SELECT count(*)::int n FROM device_events WHERE event_id=$1`,[payload.eventId])).rows[0].n,0);
+  assert.equal((await db.query(`SELECT state FROM ai_call_runs WHERE id=$1`,[run.id])).rows[0].state,'active');
+  await db.query(`UPDATE call_records SET state='active' WHERE id=$1`,[call.callId]);
+  const closesBefore=mediaCloseCount;
+  // Same eventId as the 503 attempts: it re-evaluates now that the call is active.
+  const first=await app.inject({method:'POST',url,headers:auth(deviceToken),payload});assert.equal(first.statusCode,200,first.body);
+  assert.deepEqual(first.json(),{accepted:true,alreadyEnded:false});assert.equal(mediaCloseCount,closesBefore+1);
+  const replay=await app.inject({method:'POST',url,headers:auth(deviceToken),payload});assert.equal(replay.statusCode,200,replay.body);assert.deepEqual(replay.json(),first.json());
+  assert.equal(mediaCloseCount,closesBefore+1);
+  const reused=await app.inject({method:'POST',url,headers:auth(deviceToken),payload:{...payload,telecomCreationTimeMillis:payload.telecomCreationTimeMillis+1}});assert.equal(reused.statusCode,409);assert.equal(reused.json().error.code,'EVENT_ID_REUSED');
+  const again=await app.inject({method:'POST',url,headers:auth(deviceToken),payload:{...payload,eventId:crypto.randomUUID()}});assert.equal(again.statusCode,200,again.body);assert.deepEqual(again.json(),{accepted:true,alreadyEnded:true});
+  const row=(await db.query(`SELECT run.state,run.failure_code,run.lease_until,run.lease_owner,run.cleanup_required,run.ended_at,call.state call_state
+    FROM ai_call_runs run JOIN call_records call ON call.id=run.call_id WHERE run.id=$1`,[run.id])).rows[0];
+  assert.equal(row.state,'ended');assert.equal(row.failure_code,'owner_joined');assert.equal(row.lease_until,null);assert.equal(row.lease_owner,worker.instanceId);
+  assert.equal(row.cleanup_required,false);assert.ok(row.ended_at);assert.equal(row.call_state,'active');
+  let diagRows=0;for(let i=0;i<50&&!diagRows;i++){diagRows=(await db.query(`SELECT count(*)::int n FROM diag_events WHERE call_id=$1 AND event='call.owner_joined_local'`,[call.callId])).rows[0].n;if(!diagRows)await new Promise(r=>setTimeout(r,20));}
+  assert.equal(diagRows,1);
+  assert.deepEqual(await ownerJoinedLocalViews(call.callId),[true,true,true]);
+  // Voice learns from its next read; its late fail report cannot push the call into `ending`.
+  const read=await app.inject({method:'GET',url:`/internal/v1/ai/runs/${run.id}?instanceId=${worker.instanceId}&bootId=${worker.bootId}`,headers:leaseHeaders(run.leaseToken)});assert.equal(read.statusCode,409,read.body);
+  const lateFail=await app.inject({method:'POST',url:`/internal/v1/ai/runs/${run.id}/fail`,headers:leaseHeaders(run.leaseToken),payload:{...worker,code:'media_lost'}});assert.equal(lateFail.statusCode,409,lateFail.body);
+  // Neither the reconciler nor the revoked-session cleanup nor later Telecom snapshots touch the call.
+  assert.equal(await new AiRunReconciler(db,{intervalMs:60_000,onlineSeconds:30}).tickOnce(),0);
+  // Earlier tests may leave unrelated revoked-session jobs due; only this call must stay untargeted.
+  await new RevokedCallCleanupWorker(db,{intervalMs:60_000,onlineSeconds:30}).tickOnce();
+  assert.equal((await db.query(`SELECT count(*)::int n FROM session_revoked_call_cleanups WHERE call_id=$1`,[call.callId])).rows[0].n,0);
+  await snapshot(call,'active');
+  assert.equal((await db.query(`SELECT count(*)::int n FROM commands WHERE call_id=$1 AND kind='hangup'`,[call.callId])).rows[0].n,0);
+  assert.equal((await db.query(`SELECT state FROM call_records WHERE id=$1`,[call.callId])).rows[0].state,'active');
+  assert.equal((await db.query(`SELECT state FROM ai_call_runs WHERE id=$1`,[run.id])).rows[0].state,'ended');
+  await db.query(`UPDATE call_records SET state='ended',ended_at=now() WHERE id=$1`,[call.callId]);
+  const ended=await app.inject({method:'POST',url,headers:auth(deviceToken),payload:{...payload,eventId:crypto.randomUUID()}});assert.equal(ended.statusCode,409);assert.equal(ended.json().error.code,'CALL_NOT_ACTIVE');
+  await cleanupCall(call.callId);
+});
+
+test('S94 owner-joined checks the capture binding creation time and refuses calls AI never answered',async()=>{
+  const call=await incoming();await snapshot(call,'active');
+  await db.query(`UPDATE call_records SET state='active',answered_at=now() WHERE id=$1`,[call.callId]);
+  const url=`/api/v1/gateway/calls/${call.callId}/owner-joined`;
+  const payload={eventId:crypto.randomUUID(),generation:deviceEpoch,deviceCallId:call.deviceCallId,telecomCreationTimeMillis:42};
+  await db.query(`UPDATE call_records SET answered_by_platform='device',ai_run_id=NULL WHERE id=$1`,[call.callId]);
+  const human=await app.inject({method:'POST',url,headers:auth(deviceToken),payload});assert.equal(human.statusCode,409);assert.equal(human.json().error.code,'CALL_NOT_AI_ANSWERED');
+  assert.deepEqual(await ownerJoinedLocalViews(call.callId),[false,false,false]);
+  await db.query(`INSERT INTO recording_capture_bindings(call_id,gateway_id,snapshot_owner_id,device_call_id,telecom_creation_time_millis,capture_generation,media_node_id,media_epoch)
+    SELECT id,gateway_id,snapshot_owner_id,device_call_id,41,$2,'relay-primary',1 FROM call_records WHERE id=$1`,[call.callId,deviceEpoch]);
+  const mismatch=await app.inject({method:'POST',url,headers:auth(deviceToken),payload:{...payload,eventId:crypto.randomUUID()}});assert.equal(mismatch.statusCode,409);assert.equal(mismatch.json().error.code,'DEVICE_CALL_MISMATCH');
   await cleanupCall(call.callId);
 });

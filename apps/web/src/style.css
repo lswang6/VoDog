@@ -294,3 +294,6 @@ nav button,.sim-bar button{position:relative}
 /* S80 设置分组：通用 / SIM 卡；SIM 条在设置内换行，未保存提示。 */
 .settings .settings-group-title{font-size:24px;font-weight:700;margin-bottom:4px}.settings .sim-bar{flex-wrap:wrap;overflow-x:visible}.settings .sim-bar button{max-width:100%}
 .unsaved{color:var(--red);font-size:13px;margin:0}
+/* S87 短信正文链接：颜色随气泡，确认框不套气泡底色。 */
+.sms-link{color:inherit;text-decoration:underline}
+.message-bubble .confirm-action{text-align:left}.message-bubble .confirm-action p{padding:0;background:none;color:inherit;border-radius:0}

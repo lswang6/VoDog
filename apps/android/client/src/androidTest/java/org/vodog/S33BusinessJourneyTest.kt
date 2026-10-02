@@ -974,7 +974,7 @@ class S33BusinessJourneyTest {
         waitForSettingsSection("gateway")
         settingsList.performScrollToNode(hasTestTag(gatewayTag))
         val gatewaySwitch = compose.onNodeWithTag(gatewayTag, useUnmergedTree = true)
-        waitForText("关闭网关总控")
+        waitForText("网关总控")
         gatewaySwitch.assertIsDisplayed().assertIsOn().performClick()
         captureEvidence("05-gateway-off-confirm")
         clickText("取消")

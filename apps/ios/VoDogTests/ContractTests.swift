@@ -810,6 +810,47 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(v3.compensatedPlaybackArtifacts.isEmpty)
     }
 
+    func testS94PixelUplinkTrackParsesAndBecomesDefaultPair() throws {
+        let id = "00000000-0000-4000-8000-000000000001", archive = "00000000-0000-4000-8000-000000000002"
+        let hash = String(repeating: "a", count: 64)
+        let tracks = #"[{"track":"remote_original","sourceRole":"original_capture","mediaType":"audio/wav","bytes":2044,"sha256":"\#(hash)","captureComplete":true,"gapCount":0,"droppedFrames":0},{"track":"caller_original","sourceRole":"original_capture","mediaType":"audio/wav","bytes":2044,"sha256":"\#(hash)","captureComplete":true,"gapCount":0,"droppedFrames":0}]"#
+        let common = #""source":"pixel","version":2,"archiveId":"\#(archive)","callId":"\#(id)","archiveComplete":true,"captureComplete":true,"startedAt":"2026-09-09T00:00:00Z","endedAt":"2026-09-09T00:01:00Z","tracks":\#(tracks),"timeline":{"mediaType":"application/x-ndjson","bytes":20,"sha256":"\#(hash)"}"#
+        let uplink = #"{"track":"caller_uplink","sourceRole":"uplink_capture","mediaType":"audio/wav","bytes":3044,"sha256":"\#(hash)","captureComplete":false,"gapCount":1,"droppedFrames":0}"#
+        func decode(_ extra: String) throws -> RecordingManifest? {
+            try JSONDecoder().decode(RecordingEnvelope.self, from: Data(#"{"recording":{\#(common)\#(extra)}}"#.utf8)).recording
+        }
+
+        let plain = try XCTUnwrap(decode(""))
+        XCTAssertTrue(plain.isValid(for: id, requestedSource: .pixel))
+        XCTAssertTrue(plain.uplinkArtifacts.isEmpty)
+        XCTAssertTrue(plain.ownerJoinedPlaybackArtifacts.isEmpty)
+        XCTAssertEqual(plain.defaultTogetherMode, .originals)
+
+        let v4 = try XCTUnwrap(decode(#","archiveVersion":4,"uplinkTracks":[\#(uplink)]"#))
+        XCTAssertTrue(v4.isValid(for: id, requestedSource: .pixel))
+        // An incomplete uplink does not affect the descriptor's two-original-track completeness.
+        XCTAssertEqual(v4.captureComplete, true)
+        XCTAssertEqual(v4.ownerJoinedPlaybackArtifacts.map(\.path), ["remote_original", "caller_uplink"])
+        XCTAssertEqual(v4.combinedPlaybackArtifacts.map(\.path), ["remote_original", "caller_original"])
+        XCTAssertEqual(v4.defaultTogetherMode, .ownerJoined)
+
+        XCTAssertThrowsError(try decode(#","uplinkTracks":[\#(uplink)]"#))
+        XCTAssertThrowsError(try decode(#","archiveVersion":4"#))
+        XCTAssertThrowsError(try decode(#","archiveVersion":4,"uplinkTracks":[]"#))
+        XCTAssertThrowsError(try decode(#","archiveVersion":4,"uplinkTracks":[\#(uplink),\#(uplink)]"#))
+        XCTAssertThrowsError(try decode(#","archiveVersion":4,"uplinkTracks":[\#(uplink.replacingOccurrences(of: "uplink_capture", with: "original_capture"))]"#))
+    }
+
+    func testS94TranscriptToleratesCallerUplinkAndUnknownTracks() throws {
+        let json = #"{"transcript":{"id":"job-1","callId":"call-1","status":"succeeded","attempts":1,"nextAttemptAt":null,"error":null,"result":{"text":"内容","segments":[{"track":"remote_original","speaker":"remote","text":"客户讲话"},{"track":"caller_uplink","speaker":"vodog_user","text":"机主讲话","startMs":800},{"track":"future_track","speaker":"spk_9","text":"其他"}],"providers":[{"track":"caller_uplink","provider":"provider","model":null,"version":null}],"advertisingClassification":"none","includeInReports":true,"summary":null,"actionItems":[]},"createdAt":"2026-09-09T00:00:00Z","updatedAt":"2026-09-09T00:01:00Z","completedAt":"2026-09-09T00:01:00Z"}}"#
+        let segments = try XCTUnwrap(JSONDecoder().decode(TranscriptEnvelope.self, from: Data(json.utf8)).transcript?.result?.segments)
+        XCTAssertEqual(segments.map(\.track), ["remote_original", "caller_uplink", "future_track"])
+        XCTAssertEqual(segments[1].trackTitle, "本机上行（含本机接入）")
+        XCTAssertEqual(segments[1].speakerTitle, "本人")
+        XCTAssertEqual(segments[2].trackTitle, "其他声轨")
+        XCTAssertEqual(TranscriptText.blocks(from: segments)[1].trackTitle, "本机上行（含本机接入）")
+    }
+
     func testDisabledPixelArchiveOffersMediaNodeWithoutRetryLoop() {
         let presentation = recordingErrorPresentation(
             APIError.server(503, "Pixel recording archive is not enabled", nil), source: .pixel

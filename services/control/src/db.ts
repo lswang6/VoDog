@@ -1,5 +1,6 @@
 import pg from 'pg';
 import type { PoolClient } from 'pg';
+import { diag } from './diag.js';
 
 export type Db = pg.Pool;
 export function createDb(connectionString: string): Db {
@@ -59,4 +60,30 @@ export async function withClient<T>(db: Db, fn: (c: PoolClient) => Promise<T>): 
     detach();
     c.release(takeClientError(c));
   }
+}
+
+/**
+ * A deadlock victim (40P01) and a serialization failure (40001) leave the transaction fully rolled
+ * back, so re-running the closure is safe: every `tx` closure here is pure database work — the
+ * doorbell is rung after the commit (S20 D4), media/push calls never run inside one, and every
+ * accumulator a closure mutates is declared inside it. Retry only when the ROLLBACK itself
+ * succeeded; a failed rollback marks the client broken and the state is unknown.
+ */
+export async function tx<T>(db: Db, fn: (c: PoolClient) => Promise<T>, label = 'tx'): Promise<T> {
+  return withClient(db, async (c) => {
+    for (let attempt = 1; ; attempt++) {
+      await c.query('BEGIN');
+      try {
+        const value = await fn(c);
+        await c.query('COMMIT');
+        return value;
+      } catch (e) {
+        const rollbackFailed = await safeRollback(c);
+        const code = (e as { code?: unknown } | null)?.code;
+        if (attempt >= 3 || rollbackFailed || (code !== '40P01' && code !== '40001')) throw e;
+        diag(db, 'db.deadlock_retry', { label, code, attempt }, { level: 'warn' });
+        await new Promise((resolve) => setTimeout(resolve, 10 + Math.random() * 40));
+      }
+    }
+  });
 }

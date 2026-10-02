@@ -63,6 +63,11 @@ data class DeviceCallRecord(
      * i.e. exactly the pre-S72b media behaviour.
      */
     val remoteAnswered: Boolean = false,
+    /**
+     * S94: the owner unmuted this AI-answered call on the Pixel and took it over. Durable so that a
+     * process restart mid-call never rebuilds a media leg (and then hangs up on its prebuffer failure).
+     */
+    val ownerJoined: Boolean = false,
 )
 
 /** Device-protected crash/reboot journal. Caller numbers stay in this app-private store and are never logged. */
@@ -159,6 +164,11 @@ class DeviceCallJournal(context: Context) {
             if (it.answeredByAi == answeredByAi && it.remoteAnswered) it
             else it.copy(answeredByAi = answeredByAi, remoteAnswered = true)
         }
+    }
+
+    /** S94: written once from the owner-join IO work; never cleared for the rest of this call. */
+    fun markOwnerJoined(deviceCallId: String) = synchronized(LOCK) {
+        mutate(deviceCallId) { if (it.ownerJoined) it else it.copy(ownerJoined = true) }
     }
 
     /** Reserves the exact durable ID that onCallAdded must bind to after placeCall returns. */
@@ -481,6 +491,7 @@ internal fun DeviceCallRecord.toJson() = JSONObject()
     .put("outgoingReported", outgoingReported)
     .put("outgoingPayload", outgoingPayload ?: JSONObject.NULL)
     .put("remoteAnswered", remoteAnswered)
+    .put("ownerJoined", ownerJoined)
 
 internal fun JSONObject.toRecord() = DeviceCallRecord(
     deviceCallId = getString("deviceCallId"),
@@ -503,6 +514,7 @@ internal fun JSONObject.toRecord() = DeviceCallRecord(
     outgoingPayload = nullableString("outgoingPayload"),
     // Absent in rows written before S72b: keep today's behaviour (media for any ACTIVE incoming).
     remoteAnswered = optBoolean("remoteAnswered", true),
+    ownerJoined = optBoolean("ownerJoined"),
 )
 
 private fun JSONObject.nullableString(key: String): String? =

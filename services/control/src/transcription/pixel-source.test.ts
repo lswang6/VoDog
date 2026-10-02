@@ -185,3 +185,29 @@ test('verified Pixel discovery waits for upload, then persists one source job ac
   const duplicate=await worker.enqueueCall({callId,snapshotOwnerId:user,manifest:descriptor()});assert.equal(duplicate.state,'succeeded');
   await runtime.stop();await restart.stop();
 });
+
+// S94: an archive with the owner-side uplink transcribes caller_uplink instead of caller_original.
+const uplinkBytes=Buffer.from(wav());uplinkBytes.writeInt16LE(1234,44);
+function uplinkDescriptor():PixelRecordingDescriptor{
+  return {...descriptor(2),archiveVersion:4,uplinkTracks:[{track:'caller_uplink',sourceRole:'uplink_capture',mediaType:'audio/wav',
+    bytes:uplinkBytes.length,sha256:sha(uplinkBytes),captureComplete:true,gapCount:0,droppedFrames:0}]};
+}
+test('S94 freeze swaps the caller side to caller_uplink and the worker labels its segments honestly',async()=>{
+  const m=uplinkDescriptor(),f=freezeRecordingManifest(m,callId);
+  assert.deepEqual(f.tracks.map(t=>[t.track,t.name,t.speaker,t.sha256]),[['remote_original','remote_original.wav','remote',sha(bytes)],
+    ['caller_uplink','caller_uplink.wav','vodog_user',sha(uplinkBytes)]]);
+  const changed=structuredClone(m);changed.uplinkTracks![0]!.gapCount++;assert.notEqual(f.fingerprint,freezeRecordingManifest(changed,callId).fingerprint);
+  assert.notEqual(f.fingerprint,freezeRecordingManifest(descriptor(2),callId).fingerprint);
+  // Reader: caller_uplink is a valid Pixel track request; it is opened from the pixel source.
+  const opened:string[]=[];const src:PixelTranscriptSource={manifest:async()=>m,openTrack:async(_id,track)=>{opened.push(track);return{stream:Readable.from([uplinkBytes]),size:uplinkBytes.length,sha256:sha(uplinkBytes),complete:true,start:0,end:uplinkBytes.length-1,partial:false};}};
+  const req={...request(m),track:'caller_uplink',name:'caller_uplink.wav',expectedBytes:uplinkBytes.length,expectedSha256:sha(uplinkBytes)};
+  assert.deepEqual(await new RegistryRecordingReader(db as never,unused,src).readTrack(req),uplinkBytes);assert.deepEqual(opened,['caller_uplink']);
+  await assert.rejects(new RegistryRecordingReader(db as never,unused,source(m)).readTrack({...request(m),track:'caller_original',name:'caller_original.wav'}),(e:any)=>e.code==='RECORDING_CONTRACT_MISMATCH');
+  let result:any;let done=false;const requests:TrackReadRequest[]=[];
+  const repository={claim:async()=>done?null:{id:'job',callId,snapshotOwnerId:owner,manifest:m,manifestFingerprint:f.fingerprint,leaseToken:'lease',attempts:1},
+    renewLease:async()=>true,complete:async(input:any)=>{result=input.result;done=true;return true;},fail:async(input:any)=>{throw new Error(JSON.stringify(input));}};
+  const worker=new TranscriptionWorker(repository as never,{enabled:true,reader:{readTrack:async r=>{requests.push(r);return r.track==='caller_uplink'?uplinkBytes:bytes;}},provider:{transcribe:async(_b,ctx)=>({text:`${ctx.track} 转录`})}});
+  assert.equal(await worker.tickOnce(),'succeeded');
+  assert.deepEqual(requests.map(r=>r.track),['remote_original','caller_uplink']);
+  assert.deepEqual(result.segments.map((s:any)=>[s.track,s.speaker]),[['remote_original','remote'],['caller_uplink','vodog_user']]);
+});

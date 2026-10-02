@@ -38,7 +38,20 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.TimeUnit
 
-enum class RecordingPairMode { ORIGINALS, COMPENSATED }
+/** S94: [OWNER_JOINED] = remote_original + caller_uplink, the default when a Pixel archive has an uplink track. */
+enum class RecordingPairMode { ORIGINALS, COMPENSATED, OWNER_JOINED }
+
+internal fun recordingTrackRoleMatches(
+    track: RecordingAudioTrack,
+    source: RecordingSource,
+    version: Int,
+    artifact: RecordingArtifact,
+): Boolean = when (track) {
+    RecordingAudioTrack.CALLER_PLAYOUT ->
+        source == RecordingSource.PIXEL && version == 3 && artifact.sourceRole == "derived_playout"
+    RecordingAudioTrack.CALLER_UPLINK -> source == RecordingSource.PIXEL && artifact.sourceRole == "uplink_capture"
+    else -> artifact.sourceRole == "original_capture"
+}
 
 sealed interface RecordingPlaybackState {
     data object Idle : RecordingPlaybackState
@@ -320,11 +333,7 @@ internal class HttpRecordingTrackDownloader(
             (source == RecordingSource.PIXEL && version in setOf(2, 3) && artifact.mediaType == "audio/wav")) {
             "录音来源、版本与格式不一致"
         }
-        require(
-            (track != RecordingAudioTrack.CALLER_PLAYOUT && artifact.sourceRole == "original_capture") ||
-                (track == RecordingAudioTrack.CALLER_PLAYOUT && source == RecordingSource.PIXEL && version == 3 &&
-                    artifact.sourceRole == "derived_playout")
-        ) { "录音声轨来源不一致" }
+        require(recordingTrackRoleMatches(track, source, version, artifact)) { "录音声轨来源不一致" }
         val url = base().trimEnd('/') + ClientApiRoutes.recordingTrack(callId, track, source)
         preflight(url, session.token, expectedSession, artifact, cancellation)
         cancellation.throwIfCancelled()
@@ -382,11 +391,7 @@ internal class HttpRecordingTrackDownloader(
             (source == RecordingSource.PIXEL && version in setOf(2, 3) && artifact.mediaType == "audio/wav")) {
             "录音来源、版本与格式不一致"
         }
-        require(
-            (track != RecordingAudioTrack.CALLER_PLAYOUT && artifact.sourceRole == "original_capture") ||
-                (track == RecordingAudioTrack.CALLER_PLAYOUT && source == RecordingSource.PIXEL && version == 3 &&
-                    artifact.sourceRole == "derived_playout")
-        ) { "录音声轨来源不一致" }
+        require(recordingTrackRoleMatches(track, source, version, artifact)) { "录音声轨来源不一致" }
         val url = base().trimEnd('/') + ClientApiRoutes.recordingTrack(callId, track, source, attachment = true)
         val latest = sessions.resolveSameLogin(expectedSession)
         val latestToken = checkNotNull(latest.session).token

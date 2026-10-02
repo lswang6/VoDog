@@ -1,10 +1,24 @@
-import type {DerivedTrackDescriptor,RecordingSource,TrackDescriptor} from './recording-contract';
+import type {DerivedTrackDescriptor,RecordingDescriptor,RecordingSource,TrackDescriptor,UplinkTrackDescriptor} from './recording-contract';
 
-export type PairTrackDescriptor=TrackDescriptor|DerivedTrackDescriptor;
+export type PairTrackDescriptor=TrackDescriptor|DerivedTrackDescriptor|UplinkTrackDescriptor;
+export type PlaybackPair={tracks:readonly [PairTrackDescriptor,PairTrackDescriptor];label:string;description:string};
+
+/** 可一起播放的声轨对，第一项是默认。S94：有本机上行轨时默认「对方 + 本机上行」，原声对与补偿对仍保留。 */
+export function playbackPairs(recording:RecordingDescriptor,source:RecordingSource):PlaybackPair[]{
+ const min=source==='pixel'?44:0,usable=(track:PairTrackDescriptor|undefined):track is PairTrackDescriptor=>Boolean(track&&track.bytes>min);
+ const remote=recording.tracks.find(track=>track.id==='remote_original'),caller=recording.tracks.find(track=>track.id==='caller_original');
+ const playout=recording.derivedTracks.find(track=>track.id==='caller_playout'),uplink=recording.uplinkTracks.find(track=>track.id==='caller_uplink');
+ const pairs:PlaybackPair[]=[];
+ if(!usable(remote))return pairs;
+ if(source==='pixel'&&usable(uplink))pairs.push({tracks:[remote,uplink],label:'通话双方（含本机接入）',description:'同时播放对方原声与本机上行声音，含机主在本机接入后说的话，可能存在时间偏差。'});
+ if(usable(caller))pairs.push({tracks:[remote,caller],label:'双向原声一起播放',description:'同时播放双方原声，可能存在时间偏差。需要核对细节时，可展开原始分轨。'});
+ if(source==='pixel'&&usable(playout))pairs.push({tracks:[remote,playout],label:'补偿后双向播放',description:'同时播放对方原声与独立补偿播放轨；PLC/FEC 声音不会改变原声完整性。'});
+ return pairs;
+}
 
 /** A fresh descriptor array from dashboard polling must not replace a playing pair. */
 export function recordingPairIdentity(callId:string,source:RecordingSource,tracks:readonly [PairTrackDescriptor,PairTrackDescriptor]):string{
- return JSON.stringify([callId,source,...tracks.map(track=>track.sourceRole==='original_capture'
+ return JSON.stringify([callId,source,...tracks.map(track=>track.sourceRole!=='derived_playout'
   ?[track.id,track.sourceRole,track.mediaType,track.bytes,track.sha256,track.captureComplete,track.gapCount,track.droppedFrames]
   :[track.id,track.sourceRole,track.mediaType,track.bytes,track.sha256,track.playoutComplete,track.gapCount,track.recoveryFrames])]);
 }

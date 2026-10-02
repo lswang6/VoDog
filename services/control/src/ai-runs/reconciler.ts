@@ -1,5 +1,5 @@
 import type {PoolClient} from 'pg';
-import {safeRollback,withClient,type Db} from '../db.js';
+import {tx,type Db} from '../db.js';
 import {releaseRingingCall} from './repository.js';
 import {workerError} from '../diag.js';
 
@@ -56,26 +56,25 @@ export class AiRunReconciler{
   private async process(runId:string):Promise<{callId:string;closeMedia:boolean;notifyGatewayId?:string}|null>{
     const target=await this.db.query(`SELECT gateway_id,call_id FROM ai_call_runs WHERE id=$1`,[runId]);
     if(!target.rowCount)return null;
-    let insertedGatewayId:string|null=null;
-    return withClient(this.db,async c=>{
-     try{
-      await c.query('BEGIN');
+    return tx(this.db,async c=>{
+      // Declared per attempt: a rolled-back attempt's insert must not leak into the retry.
+      let insertedGatewayId:string|null=null;
       const gateway=(await c.query(`SELECT * FROM gateways WHERE id=$1 FOR UPDATE`,[target.rows[0].gateway_id])).rows[0];
       const call=(await c.query(`SELECT * FROM call_records WHERE id=$1 FOR UPDATE`,[target.rows[0].call_id])).rows[0];
       const run=(await c.query(`SELECT *,lease_until<=now() lease_due,COALESCE(next_attempt_at,lease_until,now())<=now() retry_due,
         COALESCE(next_attempt_at,trigger_at)<=now()-interval '15 seconds' pending_stale FROM ai_call_runs WHERE id=$1 FOR UPDATE`,[runId])).rows[0];
-      if(!run||!call){await c.query('ROLLBACK');return null;}
+      if(!run||!call)return null;
       const due=(run.state==='preparing'&&run.lease_due&&run.retry_due)||
         (['answer_committed','awaiting_active','active'].includes(run.state)&&run.lease_due&&run.retry_due)||
         (['ending','reconcile_unknown'].includes(run.state)&&run.retry_due)||
         (run.state==='pending'&&run.pending_stale);
-      if(!due){await c.query('ROLLBACK');return null;}
+      if(!due)return null;
       if(['ended','failed'].includes(call.state)){
         // S27 失败记录 6: the worker's last transcript flush arrives after the hangup; the identity stays
         // so that flush can still be authenticated for a grace window (`assertLeaseOrJustEnded`).
         await c.query(`UPDATE ai_call_runs SET state='ended',ended_at=COALESCE(ended_at,now()),cleanup_required=false,
           lease_until=NULL,updated_at=now() WHERE id=$1`,[run.id]);
-        await c.query('COMMIT');return{callId:call.id,closeMedia:Boolean(run.media_attempted_at)};
+        return{callId:call.id,closeMedia:Boolean(run.media_attempted_at)};
       }
       // S22 decision 5: a `pending` run that no worker ever claimed is terminal, and the call goes
       // back to normal ringing. A late ring beats a silently dropped customer call.
@@ -83,7 +82,7 @@ export class AiRunReconciler{
         await c.query(`UPDATE ai_call_runs SET state='lost_race',next_attempt_at=NULL,failure_code='worker_unavailable',
           lease_hash=NULL,lease_until=NULL,lease_owner=NULL,lease_boot_id=NULL,updated_at=now() WHERE id=$1`,[run.id]);
         await releaseRingingCall(c,{callId:call.id,runId:run.id,reason:'ai_worker_unavailable'});
-        await c.query('COMMIT');return{callId:call.id,closeMedia:false};
+        return{callId:call.id,closeMedia:false};
       }
       if(run.state==='preparing'&&run.lease_until&&new Date(run.lease_until).getTime()<=Date.now()&&!run.answer_command_id&&!run.media_attempted_at){
         const next=call.state==='incoming_ringing'&&Number(run.attempts)<3?'pending':'lost_race';
@@ -92,10 +91,10 @@ export class AiRunReconciler{
         // Only the terminal branch releases the call: a `pending` retry still needs `call.ai_run_id`
         // to point at this run, or `claimAiRun` would never see it again.
         if(next==='lost_race')await releaseRingingCall(c,{callId:call.id,runId:run.id,reason:'lease_expired_before_answer'});
-        await c.query('COMMIT');return{callId:call.id,closeMedia:false};
+        return{callId:call.id,closeMedia:false};
       }
       const postEffect=Boolean(run.answer_command_id||run.media_attempted_at||['answer_committed','awaiting_active','active','ending','reconcile_unknown'].includes(run.state));
-      if(!postEffect){await c.query('ROLLBACK');return null;}
+      if(!postEffect)return null;
       const online=gateway.control_enabled&&gateway.telephony_ready&&gateway.last_seen_at&&Date.now()-new Date(gateway.last_seen_at).getTime()<=this.onlineSeconds*1000;
       const snapshot=await c.query(`SELECT generation,calls,observed_at>=now()-$3::int*interval '1 second' fresh FROM gateway_telecom_snapshots WHERE gateway_id=$1 AND generation=$2 FOR UPDATE`,[gateway.id,gateway.device_epoch,this.onlineSeconds]);
       const present=Boolean(call.device_call_id&&snapshot.rowCount&&snapshot.rows[0].fresh&&(snapshot.rows[0].calls as any[]).filter(item=>item.callId===call.id&&item.deviceCallId===call.device_call_id).length===1);
@@ -126,8 +125,7 @@ export class AiRunReconciler{
         await c.query(`UPDATE ai_call_runs SET state='reconcile_unknown',cleanup_required=true,next_attempt_at=now()+interval '5 seconds',
           lease_hash=NULL,lease_until=NULL,lease_owner=NULL,lease_boot_id=NULL,updated_at=now() WHERE id=$1`,[run.id]);
       }
-      await c.query('COMMIT');return{callId:call.id,closeMedia:Boolean(run.media_attempted_at),...(insertedGatewayId?{notifyGatewayId:insertedGatewayId}:{})};
-     }catch(error){await safeRollback(c);throw error;}
-    });
+      return{callId:call.id,closeMedia:Boolean(run.media_attempted_at),...(insertedGatewayId?{notifyGatewayId:insertedGatewayId}:{})};
+    },'ai.reconcile');
   }
 }

@@ -69,6 +69,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
@@ -635,16 +638,24 @@ internal fun LoadingPage(label: String) = Box(Modifier.fillMaxSize(), contentAli
     }
 }
 
-/** Monospaced phone number, used for every remote number in the app. */
+/**
+ * Monospaced phone number, used for every remote number in the app. S92: when the text also carries a
+ * contact name (`号码 · 姓名`), only the number is monospaced — see [phoneNumberTitle].
+ */
 @Composable
 internal fun PhoneNumberText(
     number: String,
     modifier: Modifier = Modifier,
     color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
 ) = Text(
-    number,
+    phoneNumberTitle(number),
     modifier = modifier,
     style = MaterialTheme.typography.titleMedium,
-    fontFamily = FontFamily.Monospace,
     color = color,
 )
+
+/** S92: [title] with monospace applied to the number range only ([phoneTitleNumberRange]). */
+internal fun phoneNumberTitle(title: String): AnnotatedString = buildAnnotatedString {
+    append(title)
+    phoneTitleNumberRange(title)?.let { addStyle(SpanStyle(fontFamily = FontFamily.Monospace), it.first, it.last + 1) }
+}

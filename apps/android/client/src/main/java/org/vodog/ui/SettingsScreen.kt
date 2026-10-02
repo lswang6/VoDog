@@ -728,11 +728,9 @@ private fun GatewayPowerCard(power: ClientGatewayPower, state: ClientUiState, mo
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    if (power.powerOn) "关闭网关总控" else "开启网关总控",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (power.powerOn) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                )
+                // S92: same wording as iOS — a neutral 「网关总控」 title; the subtitle carries the state and
+                // turning it off still goes through the confirmation dialog below.
+                Text("网关总控", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                 Text(
                     when {
                         !state.networkAvailable -> "设备未联网"

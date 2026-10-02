@@ -366,6 +366,7 @@ enum ContactDisplay {
 /// second, untruncated, line; without a name the row is the number alone, exactly as before. The
 /// `ContactDisplay` helpers stay the single-string form the accessibility labels and every other surface use.
 struct RecentCallTitle: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let number: String?
     let contactName: String?
     var nameFont: Font = .body.weight(.medium)
@@ -380,7 +381,8 @@ struct RecentCallTitle: View {
 
     var body: some View {
         if name.isEmpty {
-            Text(shownNumber).font(nameFont).monospacedDigit().lineLimit(1)
+            // Accessibility sizes get a second line rather than "159…"; the default size stays one line.
+            Text(shownNumber).font(nameFont).monospacedDigit().lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(nameFont).lineLimit(1)
@@ -416,10 +418,15 @@ func simDisplayName(_ sim: SIMChannel) -> String {
     sim.label ?? sim.phoneLabel ?? "SIM \((sim.slotIndex ?? 0) + 1)"
 }
 
+/// S91: the gateway's name when Control sends one; the full form keeps the short id so same-named gateways differ.
 func simGatewayIdentity(_ sim: SIMChannel, shortened: Bool) -> String {
     guard let id = sim.gatewayId, !id.isEmpty else { return "设备待确认" }
     let prefix = GatewayKind(sim.gatewayKind).shortPrefix
-    return shortened ? "\(prefix)\(id.prefix(8))" : "\(prefix)\(id)"
+    let short = "\(prefix)\(id.prefix(8))"
+    if let name = sim.gatewayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+        return shortened ? name : "\(name) · \(short)"
+    }
+    return shortened ? short : "\(prefix)\(id)"
 }
 
 private func simCompactDetail(_ sim: SIMChannel) -> String {
@@ -434,9 +441,17 @@ struct LoadStateView: View {
     }
 }
 
-func displayDate(_ value: String?) -> String {
+/// SMS and passkey dates: the Android client's 「2026年10月1日 15:32」, never the device locale's wording. No
+/// gateway zone travels with these rows, so the zone is the records fallback (`resolvedTimeZone(callZone: nil)`).
+func displayDate(_ value: String?, timeZone: TimeZone = GatewayTimeDisplay.resolvedTimeZone(callZone: nil)) -> String {
     guard let value else { return "—" }
-    return (try? Date(value, strategy: .iso8601).formatted(date: .abbreviated, time: .shortened)) ?? value
+    guard let date = GatewayTimeDisplay.parseISO(value) else { return value }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.timeZone = timeZone
+    formatter.dateFormat = "yyyy年M月d日 HH:mm"
+    return formatter.string(from: date)
 }
 
 enum GatewayTimeDisplay {

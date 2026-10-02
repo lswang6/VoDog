@@ -58,6 +58,7 @@ func main() {
 	remoteBytes := flag.Int64("remote-bytes", 0, "verified remote WAV bytes (timeline only)")
 	callerBytes := flag.Int64("caller-bytes", 0, "verified caller WAV bytes (timeline only)")
 	playoutBytes := flag.Int64("playout-bytes", 0, "verified derived playout WAV bytes (v3 timeline only)")
+	uplinkBytes := flag.Int64("uplink-bytes", 0, "verified owner uplink WAV bytes (v4 timeline only)")
 	flag.Parse()
 	if *root == "" || *input == "" || *output == "" || (*kind != "wav" && *kind != "timeline") || *maxOutput <= 0 ||
 		(*kind == "timeline" && (*remoteBytes < 44 || *callerBytes < 44)) {
@@ -79,6 +80,12 @@ func main() {
 			fatal("invalid_arguments")
 		}
 		bounds["caller_playout"] = *playoutBytes
+	}
+	if *uplinkBytes != 0 {
+		if *uplinkBytes < 44 {
+			fatal("invalid_arguments")
+		}
+		bounds["caller_uplink"] = *uplinkBytes
 	}
 	value, err := verify(*input, *output, *kind, *maxOutput, bounds)
 	if err != nil {
@@ -280,7 +287,7 @@ func validateJSONL(path string, bounds timelineBounds) error {
 			}
 		case "frame", "playout_frame":
 			track, trackOK := value["track"].(string)
-			if !trackOK || (event == "frame" && !originalTimelineTrack(track)) ||
+			if !trackOK || (event == "frame" && !originalTimelineTrack(track) && !uplinkTimelineTrack(track, bounds)) ||
 				(event == "playout_frame" && track != "caller_playout") || !jsonInteger(value["timestampUs"], 0, maxSafeInteger) ||
 				!jsonInteger(value["fileOffset"], 44, maxSafeInteger) || !jsonInteger(value["sampleCount"], 1, 256*1024*1024) {
 				return invalid(errors.New("invalid frame event"))
@@ -352,5 +359,11 @@ func originalTimelineTrack(track string) bool {
 
 func timelineTrack(track string, bounds timelineBounds) bool {
 	_, ok := bounds[track]
-	return ok && (originalTimelineTrack(track) || track == "caller_playout")
+	return ok && (originalTimelineTrack(track) || track == "caller_playout" || track == "caller_uplink")
+}
+
+// S94: the owner-side uplink capture follows original-frame rules, only when its WAV is in the archive.
+func uplinkTimelineTrack(track string, bounds timelineBounds) bool {
+	_, ok := bounds[track]
+	return ok && track == "caller_uplink"
 }

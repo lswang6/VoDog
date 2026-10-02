@@ -178,6 +178,26 @@ interface MediaLegRejoiner {
     suspend fun awaitNetwork(budgetMs: Long): Boolean = true
 }
 
+/**
+ * S94: the bridged session's VOICE_UPLINK capture (`caller_uplink`). Production wraps an AudioRecord
+ * ([AudioRecordUplinkSource]); unit tests use a fake. Every failure only loses this optional track.
+ */
+interface UplinkPcmSource : Closeable {
+    /** Starts capture; throws when the platform refuses it. */
+    fun start()
+    /** Blocking read of up to one frame into [buffer]; < 0 is a platform read error. */
+    fun read(buffer: ByteArray): Int
+    /** About once a second on the uplink thread: recording-configuration poll. */
+    fun poll() = Unit
+    /** The platform currently reports this capture as silenced (S49). */
+    val silenced: Boolean get() = false
+    /** Platform-confirmed loss without a known interval (silenced at some point, or unknown reads). */
+    val incomplete: Boolean get() = false
+    fun report(final: Boolean, terminalState: String) = Unit
+    /** Teardown, from another thread: makes a blocked [read] return (release stays on the reader). */
+    fun unblock() = Unit
+}
+
 /** Captures the user's mute state before this session and restores that exact value on close. */
 interface GatewayMuteLease {
     fun acquireAndMute(): Boolean
@@ -233,6 +253,9 @@ class GatewayAudioMediaSession(
     carrierAudioCodec: () -> String? = { null },
     // S73: null = a transport loss is fatal (pre-S73 behaviour, and every unit fixture).
     private val rejoiner: MediaLegRejoiner? = null,
+    // S94: null = no `caller_uplink` thread (every pre-S94 fixture). The factory may return null
+    // after logging why (no microphone foreground); the track is then simply absent.
+    private val uplinkSource: (() -> UplinkPcmSource?)? = null,
 ) : Closeable {
     private val monotonicUs = monotonicUs
     // S73 D5: swapped under [setupLock] by a rejoin; teardown closes whichever leg is current.
@@ -305,7 +328,20 @@ class GatewayAudioMediaSession(
     private var playoutTicks = 0L
     private val sequence = AtomicLong()
     private val workers = mutableListOf<Thread>()
-    private val mediaProducersDone = CountDownLatch(2)
+    // encode + decode, plus the S94 uplink thread when there is one: it always counts down exactly once.
+    private val mediaProducersDone = CountDownLatch(if (uplinkSource == null) 2 else 3)
+    // S94 本机接入: set lock-free by the main-thread audio callback; injection stops on the next frame.
+    private val ownerLocal = AtomicBoolean(false)
+    private val ownerLocalEntered = AtomicBoolean(false)
+    private val ownerTransportClosed = AtomicBoolean(false)
+    @Volatile private var ownerTransportStats: Map<String, Long>? = null
+    // S94 caller_uplink: its own hand-off queue, so the extra stream can never evict remote_original.
+    private val uplinkQueue = ArrayBlockingQueue<UplinkWork>(RECORD_QUEUE_FRAMES)
+    private val pendingUplinkDrops = AtomicLong()
+    private val uplinkAbandoned = AtomicBoolean(false)
+    private val uplinkIncomplete = AtomicBoolean(false)
+    private val uplinkHeardAudio = AtomicBoolean(false)
+    @Volatile private var activeUplink: UplinkPcmSource? = null
     private val fatalSignaled = AtomicBoolean(false)
     private val fatalCode = AtomicReference<String?>(null)
     private val requestedTerminalState = AtomicReference("incomplete")
@@ -354,7 +390,7 @@ class GatewayAudioMediaSession(
 
     /** Called by the DataChannel listener; it never decodes or writes files on the WebRTC thread. */
     fun onRemotePacket(packet: MediaPacket) {
-        if (!running.get() || packet.direction != MediaDirection.USER_UPLINK) return
+        if (!running.get() || ownerLocal.get() || packet.direction != MediaDirection.USER_UPLINK) return
         val work = RemoteWork(packet, relativeNow())
         while (!decodeQueue.offer(work)) {
             // S70: drop the oldest; the newest packet is what the caller is saying now.
@@ -366,7 +402,7 @@ class GatewayAudioMediaSession(
 
     /** AudioTrack playback thread: one 20 ms frame per write, or null for endpoint silence. */
     private fun nextPlaybackFrame(): ByteArray? {
-        if (!running.get() || ingressStopped.get() || !injectionArmed.get()) return null
+        if (!running.get() || ingressStopped.get() || !injectionArmed.get() || ownerLocal.get()) return null
         if (playout == null) return legacyPlayoutQueue.poll()
         return try {
             synchronized(playoutLock) { pullLocked(fromPlayback = true)?.pcm }
@@ -486,7 +522,8 @@ class GatewayAudioMediaSession(
     private fun sendCounters(): Map<String, Long> = mapOf(
         "txPackets" to txPackets.get(), "encodeQueueDrops" to encodeQueueDrops.get(),
         "transportSendDrops" to transportSendDrops.get(),
-        "transportBackpressureDrops" to (runCatching { transport.networkStats()["transportBackpressureDrops"] }.getOrNull() ?: 0L),
+        "transportBackpressureDrops" to ((ownerTransportStats ?: runCatching { transport.networkStats() }.getOrNull())
+            ?.get("transportBackpressureDrops") ?: 0L),
     )
 
     /** S72c: one `media.stats` row per [STATS_INTERVAL_US] while running; called from [recordingLoop]. */
@@ -517,6 +554,8 @@ class GatewayAudioMediaSession(
      * code, so a racing hangup still upgrades the terminal state).
      */
     internal fun onTransportFailure(code: String, reason: String = code) {
+        // S94: after the owner joined locally the room is not needed; its loss is not a failure.
+        if (ownerLocal.get()) return
         val rejoiner = rejoiner
         if (rejoiner == null || code != "transport_disconnected" || !established.get() || !running.get()) {
             signalFatal(code); return
@@ -538,9 +577,9 @@ class GatewayAudioMediaSession(
                             "offline" to rejoiner.isOffline(it)) } ?: emptyMap()),
                         callId = diagCallId, level = if (ok) "info" else "warn")
                 }, rejoiner::isOffline, rejoiner::awaitNetwork) { used, budgetMs -> rejoiner.connect(used, budgetMs) }
-            if (next == null) { signalFatal("transport_disconnected"); return@launch }
+            if (next == null) { if (!ownerLocal.get()) signalFatal("transport_disconnected"); return@launch }
             val installed = synchronized(setupLock) {
-                if (!running.get() || ingressStopped.get()) false
+                if (!running.get() || ingressStopped.get() || ownerLocal.get()) false
                 else { transport = next; newLeg.set(true); rejoins.incrementAndGet(); true }
             }
             if (!installed) runCatching { next.close() }
@@ -570,6 +609,32 @@ class GatewayAudioMediaSession(
         pendingRemoteDrops.set(0); pendingCallerDrops.set(0)
         recorder = create()
         true
+    }
+
+    val isOwnerLocal: Boolean get() = ownerLocal.get()
+
+    /** S94 main thread: lock-free; [nextPlaybackFrame] writes silence from the next frame on. */
+    fun markOwnerLocal() { ownerLocal.set(true) }
+
+    /**
+     * S94 a: IO thread, idempotent. Injection stops at once; the transport stays open until Control
+     * settled the owner-joined report ([controlSettled]) or [waitMs] passed, so Voice cannot reach
+     * media_lost / rejoin_timeout before Control knows. Endpoint, uplink and recording keep running
+     * until Telecom ends the call.
+     */
+    fun enterOwnerLocal(controlSettled: java.util.concurrent.Future<*>, waitMs: Long = OWNER_CONTROL_WAIT_MS): Boolean {
+        ownerLocal.set(true)
+        if (!ownerLocalEntered.compareAndSet(false, true)) return false
+        decodeQueue.clear(); legacyPlayoutQueue.clear()
+        rejoinScope.cancel()
+        runCatching { controlSettled.get(waitMs, TimeUnit.MILLISECONDS) }
+        synchronized(setupLock) {
+            if (!running.get()) return true // Teardown already owns the transport.
+            ownerTransportStats = runCatching { transport.networkStats() }.getOrDefault(emptyMap())
+            ownerTransportClosed.set(true)
+            runCatching { transport.close() }
+        }
+        return true
     }
 
     fun stats() = AudioMediaSessionStats(
@@ -605,6 +670,8 @@ class GatewayAudioMediaSession(
             val transportStopped = runCatching { transport.close() }.isSuccess
             endpointStopped && transportStopped
         }
+        // S94: as the endpoint's unblockIo, so a blocked VOICE_UPLINK read cannot outlast the join.
+        activeUplink?.let { runCatching { it.unblock() } }
         // running=false makes the listener reject new ingress while queued encode/decode work drains.
         workers.filter { it.name != "VoDog.recording" }.forEach { worker ->
             if (worker !== Thread.currentThread()) runCatching { worker.join(JOIN_MS) }
@@ -615,7 +682,8 @@ class GatewayAudioMediaSession(
         val workersStopped = workers.none(Thread::isAlive)
         flushDropMarkers()
         val codecStopped = workersStopped && runCatching { codec.close() }.isSuccess
-        val transportStatsResult = runCatching { transport.networkStats() }
+        // S94: an owner-local session closed its transport mid-call; the snapshot is its final stats.
+        val transportStatsResult = ownerTransportStats?.let { Result.success(it) } ?: runCatching { transport.networkStats() }
             .onFailure { signalFatal("transport_stats_failed") }
         val transportStats = transportStatsResult.getOrDefault(emptyMap())
         val recorder = recorder
@@ -630,6 +698,15 @@ class GatewayAudioMediaSession(
             }
             transportStats["transportMissingPackets"]?.takeIf { it > 0 }?.let { missing ->
                 runCatching { recorder.markDropped(OriginalAudioTrack.CALLER_ORIGINAL, relativeNow(), missing) }
+            }
+            if (uplinkIncomplete.get()) {
+                runCatching { recorder.markCaptureIncomplete(UplinkAudioTrack.CALLER_UPLINK) }
+            }
+            // S49: a capture that never carried one non-zero sample is platform silence, not the
+            // owner; keeping it would make Control mix/transcribe it instead of caller_original.
+            if (recorder.hasUplink && !uplinkHeardAudio.get()) {
+                runCatching { recorder.abortUplink() }
+                runCatching { GatewayDiag.log("media.uplink_capture.all_zero_dropped", emptyMap(), callId = diagCallId, level = "warn") }
             }
             runCatching { recorder.finish(requestedTerminalState.get(), transportStats + codec.encodingStats() + (playout?.stats() ?: emptyMap()) + mapOf(
                         "decoderLibopus" to if (codec.receiveRecoveryEnabled) 1L else 0L,
@@ -700,12 +777,14 @@ class GatewayAudioMediaSession(
         workers += worker("VoDog.recording") { recordingLoop() }
         workers += worker("VoDog.opus.encode") { encodeLoop() }
         workers += worker("VoDog.opus.decode") { decodeLoop() }
+        uplinkSource?.let { open -> workers += worker("VoDog.uplink") { uplinkLoop(open) } }
         workers.forEach(Thread::start)
     }
 
     private fun recordingLoop() {
-        while (mediaProducersDone.count > 0 || recordQueue.isNotEmpty()) {
+        while (mediaProducersDone.count > 0 || recordQueue.isNotEmpty() || uplinkQueue.isNotEmpty()) {
             maybeLogStats()
+            recorder?.let(::drainUplink) ?: uplinkQueue.clear()
             val work = try { recordQueue.poll(100, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt(); return
             }
@@ -726,6 +805,8 @@ class GatewayAudioMediaSession(
         try {
             while (running.get() || encodeQueue.isNotEmpty()) {
                 val work = encodeQueue.poll(100, TimeUnit.MILLISECONDS) ?: continue
+                // S94: nobody is listening once the owner-local transport closed; not a send drop.
+                if (ownerTransportClosed.get()) continue
                 val startedNs = System.nanoTime()
                 val encodedFrames = try {
                     codec.encode(work.pcm, work.timestampUs)
@@ -739,16 +820,94 @@ class GatewayAudioMediaSession(
             }
             codec.finishEncode(relativeNow()).forEach(::sendEncoded)
         } catch (_: Exception) {
-            signalFatal("encode_or_send_failed")
+            // S94: a send racing the owner-local close hits a disposed DataChannel; not a failure.
+            if (!ownerTransportClosed.get()) signalFatal("encode_or_send_failed")
         } finally {
             mediaProducersDone.countDown()
         }
     }
 
     private fun sendEncoded(encoded: EncodedOpusFrame) {
+        if (ownerTransportClosed.get()) return
         val packet = MediaPacket(MediaDirection.CELLULAR_DOWNLINK, FRAME_MS,
             sequence.getAndIncrement() and 0xffff_ffffL, encoded.presentationTimeUs, encoded.payload)
         if (transport.send(packet) == MediaSendResult.SENT) txPackets.incrementAndGet() else transportSendDrops.incrementAndGet()
+    }
+
+    /**
+     * S94 `caller_uplink` producer. It waits for an established leg with a recorder (an early leg gets
+     * one only at ACTIVE), then reads VOICE_UPLINK on the frame-length clock like the passive recorder.
+     * Any failure is one diag row and an incomplete/absent track; it never signals fatal.
+     */
+    private fun uplinkLoop(open: () -> UplinkPcmSource?) {
+        var source: UplinkPcmSource? = null
+        var terminalState = "ended"
+        try {
+            while (running.get() && (!established.get() || recorder == null)) Thread.sleep(UPLINK_WAIT_MS)
+            if (!running.get()) return
+            source = try { open() } catch (error: Exception) { uplinkFailed("open", error); null } ?: return
+            activeUplink = source
+            try { source.start() } catch (error: Exception) { terminalState = "failed"; uplinkFailed("start", error); return }
+            val buffer = ByteArray(PCM_FRAME_BYTES)
+            val baseUs = relativeNow()
+            var elapsedUs = 0L
+            var frames = 0L
+            while (running.get() && !uplinkAbandoned.get()) {
+                if (frames % UPLINK_POLL_FRAMES == 0L) source.poll()
+                val read = source.read(buffer)
+                if (read < 0) throw IllegalStateException("VOICE_UPLINK read $read")
+                if (read == 0) { Thread.sleep(UPLINK_ZERO_READ_BACKOFF_MS); continue }
+                frames++
+                val pcm = buffer.copyOf(read - read % 2)
+                if (pcm.isEmpty()) continue
+                if (!uplinkHeardAudio.get() && !isAllZeroPcm(pcm, pcm.size)) uplinkHeardAudio.set(true)
+                val timestampUs = baseUs + elapsedUs
+                elapsedUs += pcm.size * 1_000_000L / PCM_BYTES_PER_SECOND
+                val work = UplinkWork(pcm, timestampUs, source.silenced)
+                while (!uplinkQueue.offer(work)) {
+                    if (uplinkQueue.poll() != null) pendingUplinkDrops.incrementAndGet()
+                }
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } catch (error: Exception) {
+            terminalState = "incomplete"; uplinkIncomplete.set(true); uplinkFailed("read", error)
+        } finally {
+            source?.let { value ->
+                runCatching { value.poll() }
+                if (runCatching { value.incomplete }.getOrDefault(true)) uplinkIncomplete.set(true)
+                runCatching { value.close() }
+                runCatching { value.report(final = true, terminalState = terminalState) }
+            }
+            mediaProducersDone.countDown()
+        }
+    }
+
+    /** Recording thread. A write failure drops the uplink track whole; it is never `recording_write_failed`. */
+    private fun drainUplink(recorder: LocalCallRecorder) {
+        while (true) {
+            val work = uplinkQueue.poll() ?: return
+            if (uplinkAbandoned.get()) continue
+            try {
+                pendingUplinkDrops.getAndSet(0).takeIf { it > 0 }?.let {
+                    recorder.markDropped(UplinkAudioTrack.CALLER_UPLINK, work.timestampUs, it)
+                }
+                recorder.appendUplink(work.pcm, work.timestampUs)
+                if (work.silenced) recorder.markCaptureGapDuration(UplinkAudioTrack.CALLER_UPLINK, work.timestampUs,
+                    work.pcm.size * 1_000_000L / PCM_BYTES_PER_SECOND)
+            } catch (error: Exception) {
+                uplinkAbandoned.set(true); uplinkIncomplete.set(true)
+                runCatching { recorder.abortUplink() }
+                uplinkFailed("write", error)
+            }
+        }
+    }
+
+    private fun uplinkFailed(phase: String, error: Throwable) {
+        runCatching {
+            GatewayDiag.log("media.uplink_capture_failed", mapOf("phase" to phase,
+                "reason" to (error.message ?: error.javaClass.simpleName).take(120)), callId = diagCallId, level = "warn")
+        }
     }
 
     private fun decodeLoop() {
@@ -874,6 +1033,9 @@ class GatewayAudioMediaSession(
             OriginalAudioTrack.CALLER_ORIGINAL to pendingCallerDrops.getAndSet(0)).forEach { (track, count) ->
             if (count > 0) runCatching { recorder.markDropped(track, 0, count) }
         }
+        pendingUplinkDrops.getAndSet(0).takeIf { it > 0 && !uplinkAbandoned.get() }?.let { count ->
+            runCatching { recorder.markDropped(UplinkAudioTrack.CALLER_UPLINK, 0, count) }
+        }
     }
 
     private fun onEndpointFailure(failure: TelephonyAudioEndpoint.Failure) =
@@ -916,6 +1078,7 @@ class GatewayAudioMediaSession(
 
     private data class PcmWork(val pcm: ByteArray, val timestampUs: Long)
     private data class RemoteWork(val packet: MediaPacket, val receivedTimelineUs: Long)
+    private class UplinkWork(val pcm: ByteArray, val timestampUs: Long, val silenced: Boolean)
     private data class RecordWork(
         val track: OriginalAudioTrack,
         val pcm: ByteArray,
@@ -943,5 +1106,9 @@ class GatewayAudioMediaSession(
         const val TEARDOWN_WAIT_MS = 8_000L
         const val TERMINAL_UPGRADE_GRACE_MS = 400L
         const val STATS_INTERVAL_US = 30_000_000L
+        const val UPLINK_WAIT_MS = 20L
+        const val UPLINK_ZERO_READ_BACKOFF_MS = 5L // As the endpoint's ZERO_IO_BACKOFF_MS.
+        const val UPLINK_POLL_FRAMES = 50L // 1 s of 20 ms frames
+        const val OWNER_CONTROL_WAIT_MS = 3_000L
     }
 }

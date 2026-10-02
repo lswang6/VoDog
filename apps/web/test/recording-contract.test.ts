@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {playbackPairs} from '../src/recording-pair.ts';
 import {parseRecording,recordingAttachmentFilename,recordingUrl,verifyPixelTrackHeaders} from '../src/recording-contract.ts';
 const id='f0f07951-cd27-48d5-a472-39f547737d7b';
 const digest='a'.repeat(64);
@@ -117,4 +118,35 @@ test('stale hash, weak ETag, wrong range and MIME cannot expose a playable WAV U
   const headers=validHeaders();headers.set(key,value);assert.throws(()=>verifyPixelTrackHeaders(206,headers,track));
  }
  for(const status of [401,404,416,503])assert.throws(()=>verifyPixelTrackHeaders(status,validHeaders(),track));
+});
+// S94: v4 归档对外仍是 version 2/3 + 两条原始轨，另带可选 archiveVersion/uplinkTracks。
+const uplink=()=>({track:'caller_uplink',sourceRole:'uplink_capture',mediaType:'audio/wav',bytes:4044,sha256:'d'.repeat(64),captureComplete:false,gapCount:2,droppedFrames:3,durationMs:60000});
+const pixelV4=()=>({...pixelV3(),archiveVersion:4,uplinkTracks:[uplink()]});
+test('S94 uplink track parses, keeps original completeness authoritative and becomes the default pair',()=>{
+ const value=parseRecording(pixelV4(),'pixel',id)!;
+ assert.equal(value.version,3);assert.equal(value.archiveVersion,4);assert.equal(value.captureComplete,false);
+ assert.deepEqual(value.uplinkTracks,[{id:'caller_uplink',sourceRole:'uplink_capture',mediaType:'audio/wav',bytes:4044,sha256:'d'.repeat(64),captureComplete:false,gapCount:2,droppedFrames:3,durationMs:60000}]);
+ const pairs=playbackPairs(value,'pixel');
+ assert.deepEqual(pairs.map(pair=>[pair.label,...pair.tracks.map(track=>track.id)]),[
+  ['通话双方（含本机接入）','remote_original','caller_uplink'],['双向原声一起播放','remote_original','caller_original'],['补偿后双向播放','remote_original','caller_playout'],
+ ]);
+ const v2=parseRecording({...pixel(),archiveVersion:4,uplinkTracks:[uplink()]},'pixel',id)!;
+ assert.equal(v2.version,2);assert.deepEqual(playbackPairs(v2,'pixel').map(pair=>pair.tracks[1].id),['caller_uplink','caller_original']);
+ assert.equal(recordingUrl(id,'pixel','caller_uplink'),`/api/v1/calls/${id}/recordings/caller_uplink?source=pixel`);
+ assert.throws(()=>recordingUrl(id,'media_node','caller_uplink'));
+ assert.equal(recordingAttachmentFilename(id,'pixel','caller_uplink',`attachment; filename="${id}-caller_uplink.mp3"`,'mp3'),`${id}-caller_uplink.mp3`);
+});
+test('S94 without uplinkTracks keeps the existing pairs and descriptor shape',()=>{
+ const v3=parseRecording(pixelV3(),'pixel',id)!;
+ assert.equal(v3.archiveVersion,undefined);assert.deepEqual(v3.uplinkTracks,[]);
+ assert.deepEqual(playbackPairs(v3,'pixel').map(pair=>pair.label),['双向原声一起播放','补偿后双向播放']);
+ assert.deepEqual(playbackPairs(parseRecording(pixel(),'pixel',id)!,'pixel').map(pair=>pair.label),['双向原声一起播放']);
+ assert.deepEqual(playbackPairs(parseRecording(legacy(),'media_node',id)!,'media_node').map(pair=>pair.label),['双向原声一起播放']);
+});
+test('S94 malformed uplinkTracks or archiveVersion make the descriptor invalid',()=>{
+ for(const patch of [{archiveVersion:undefined},{uplinkTracks:undefined},{archiveVersion:3},{archiveVersion:'4'},{uplinkTracks:[]},{uplinkTracks:[uplink(),uplink()]},{uplinkTracks:{}}])
+  assert.throws(()=>parseRecording({...pixelV4(),...patch},'pixel',id));
+ for(const uplinkPatch of [{track:'caller_original'},{sourceRole:'original_capture'},{mediaType:'audio/ogg'},{bytes:43},{bytes:-1},{sha256:'D'.repeat(64)},{captureComplete:null},{gapCount:.5},{droppedFrames:-1},{durationMs:-1}]){
+  const invalid=pixelV4();Object.assign(invalid.uplinkTracks[0],uplinkPatch);assert.throws(()=>parseRecording(invalid,'pixel',id));
+ }
 });

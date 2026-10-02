@@ -25,6 +25,8 @@ class CallReportsTest {
         val sim = JSONObject().put("id", "sim-1").put("label", "SIM 1").put("phoneLabel", "+8619900000101").put("gatewayId", "b3a67a31-0000")
         assertEquals("+8619900000101 · PX-b3a67a31", callLineLabel(sim))
         assertEquals("SIM 1 · DJI-b3a67a31", callLineLabel(JSONObject(sim.toString()).put("phoneLabel", "").put("gatewayKind", "dji4g")))
+        assertEquals("+8619900000101 · Pixel 7 Pro", callLineLabel(JSONObject(sim.toString()).put("gatewayName", "Pixel 7 Pro")))
+        assertEquals("+8619900000101 · PX-b3a67a31", callLineLabel(JSONObject(sim.toString()).put("gatewayName", JSONObject.NULL)))
         assertEquals("未命名号码 · 网关待确认", callLineLabel(JSONObject().put("phoneLabel", JSONObject.NULL).put("gatewayId", JSONObject.NULL)))
         assertNull(callLineLabel(null))
     }
@@ -232,8 +234,8 @@ class CallReportsTest {
             .put("createdAt", "now").put("updatedAt", "now").put("completedAt", "now"))
         val transcript = requireNotNull(parseCallTranscript(envelope))
         val parsed = requireNotNull(transcript.result)
-        assertEquals(OriginalTranscriptTrack.REMOTE_ORIGINAL, parsed.segments[0].track)
-        assertEquals(OriginalTranscriptTrack.CALLER_ORIGINAL, parsed.segments[1].track)
+        assertEquals(TranscriptTrack.REMOTE_ORIGINAL, parsed.segments[0].track)
+        assertEquals(TranscriptTrack.CALLER_ORIGINAL, parsed.segments[1].track)
         assertFalse(parsed.includeInReports)
         assertEquals("xai", parsed.providers.single().provider)
     }
@@ -245,31 +247,31 @@ class CallReportsTest {
     @Test fun transcriptMergesPerWordSegmentsIntoOneReadableBlockPerTrack() {
         val words = "尊敬的客户，欢迎致电中国电信".map { it.toString() }
         val segments = words.mapIndexed { index, word ->
-            TranscriptSegment(OriginalTranscriptTrack.REMOTE_ORIGINAL, "remote", word,
+            TranscriptSegment(TranscriptTrack.REMOTE_ORIGINAL, "remote", word,
                 index * 200.0, index * 200.0 + 200)
         }
         val blocks = mergeTranscriptSegments(segments)
         assertEquals(1, blocks.size)
         assertEquals("尊敬的客户，欢迎致电中国电信", blocks.single().text)
         assertEquals(0.0, blocks.single().startMs)
-        assertEquals(OriginalTranscriptTrack.REMOTE_ORIGINAL, blocks.single().track)
+        assertEquals(TranscriptTrack.REMOTE_ORIGINAL, blocks.single().track)
     }
 
     @Test fun transcriptBlocksKeepTracksAndSpeakersApartAndSkipBlankText() {
         val segments = listOf(
-            TranscriptSegment(OriginalTranscriptTrack.REMOTE_ORIGINAL, "remote", "你好", 0.0, 400.0),
-            TranscriptSegment(OriginalTranscriptTrack.CALLER_ORIGINAL, "vodog_user", "你好，", 500.0, 700.0),
-            TranscriptSegment(OriginalTranscriptTrack.CALLER_ORIGINAL, "vodog_user", "请问有什么可以帮您", 700.0, 1_400.0),
-            TranscriptSegment(OriginalTranscriptTrack.CALLER_ORIGINAL, "spk_2", "另一人", 1_500.0, 1_900.0),
-            TranscriptSegment(OriginalTranscriptTrack.REMOTE_ORIGINAL, "remote", "   ", null, null),
+            TranscriptSegment(TranscriptTrack.REMOTE_ORIGINAL, "remote", "你好", 0.0, 400.0),
+            TranscriptSegment(TranscriptTrack.CALLER_ORIGINAL, "vodog_user", "你好，", 500.0, 700.0),
+            TranscriptSegment(TranscriptTrack.CALLER_ORIGINAL, "vodog_user", "请问有什么可以帮您", 700.0, 1_400.0),
+            TranscriptSegment(TranscriptTrack.CALLER_ORIGINAL, "spk_2", "另一人", 1_500.0, 1_900.0),
+            TranscriptSegment(TranscriptTrack.REMOTE_ORIGINAL, "remote", "   ", null, null),
         )
         val blocks = mergeTranscriptSegments(segments)
         assertEquals(listOf("你好", "你好，请问有什么可以帮您", "另一人"), blocks.map { it.text })
         assertEquals(
             listOf(
-                OriginalTranscriptTrack.REMOTE_ORIGINAL,
-                OriginalTranscriptTrack.CALLER_ORIGINAL,
-                OriginalTranscriptTrack.CALLER_ORIGINAL,
+                TranscriptTrack.REMOTE_ORIGINAL,
+                TranscriptTrack.CALLER_ORIGINAL,
+                TranscriptTrack.CALLER_ORIGINAL,
             ),
             blocks.map { it.track },
         )
@@ -420,6 +422,129 @@ class CallReportsTest {
         assertTrue(runCatching {
             parseRecordingManifest(JSONObject().put("recording", invalidV3), callId, RecordingSource.PIXEL)
         }.isFailure)
+    }
+
+    // S94: v4 archives keep descriptor version 2/3 + two original tracks, plus optional archiveVersion/uplinkTracks.
+    private val s94CallId = "11111111-1111-4111-8111-111111111111"
+    private fun s94Uplink() = JSONObject()
+        .put("track", "caller_uplink").put("sourceRole", "uplink_capture").put("mediaType", "audio/wav")
+        .put("bytes", 4044).put("sha256", "d".repeat(64)).put("captureComplete", false)
+        .put("gapCount", 2).put("droppedFrames", 3).put("durationMs", 60_000)
+    private fun s94PixelV2() = JSONObject()
+        .put("source", "pixel").put("version", 2)
+        .put("archiveId", "22222222-2222-4222-8222-222222222222")
+        .put("callId", s94CallId).put("archiveComplete", true).put("captureComplete", true)
+        .put("startedAt", "2026-09-10T00:00:00Z").put("endedAt", "2026-09-10T00:01:00Z")
+        .put("tracks", JSONArray()
+            .put(pixelTrack("remote_original", true, 0, 0).put("durationMs", 8_000))
+            .put(pixelTrack("caller_original", true, 0, 0)))
+        .put("timeline", JSONObject().put("mediaType", "application/x-ndjson").put("bytes", 90).put("sha256", "b".repeat(64)))
+    private fun s94PixelV4() = s94PixelV2().put("archiveVersion", 4).put("uplinkTracks", JSONArray().put(s94Uplink()))
+    private fun s94Parse(recording: JSONObject) =
+        parseRecordingManifest(JSONObject().put("recording", recording), s94CallId, RecordingSource.PIXEL)
+
+    @Test fun s94UplinkTrackParsesAndBecomesTheDefaultPair() {
+        val manifest = requireNotNull(s94Parse(s94PixelV4()))
+        assertEquals(2, manifest.version)
+        // The uplink is incomplete but the descriptor's completeness only follows the two originals.
+        assertTrue(manifest.captureComplete!!)
+        val uplink = requireNotNull(manifest.artifact(RecordingAudioTrack.CALLER_UPLINK))
+        assertEquals(
+            RecordingArtifact(
+                RecordingAudioTrack.CALLER_UPLINK, "audio/wav", 4044, "d".repeat(64), false, 2, 3,
+                sourceRole = "uplink_capture", durationMs = 60_000,
+            ),
+            uplink,
+        )
+        assertEquals(RecordingPairMode.OWNER_JOINED, manifest.defaultPairMode)
+        assertEquals(
+            listOf(RecordingAudioTrack.REMOTE_ORIGINAL, RecordingAudioTrack.CALLER_UPLINK),
+            manifest.pairArtifacts(RecordingPairMode.OWNER_JOINED).map { it.track },
+        )
+        assertEquals(
+            listOf(RecordingAudioTrack.REMOTE_ORIGINAL, RecordingAudioTrack.CALLER_ORIGINAL),
+            manifest.pairArtifacts(RecordingPairMode.ORIGINALS).map { it.track },
+        )
+        assertEquals(60_000L, manifest.pairDurationMs(RecordingPairMode.OWNER_JOINED))
+        assertTrue(recordingTrackRoleMatches(RecordingAudioTrack.CALLER_UPLINK, RecordingSource.PIXEL, 2, uplink))
+        assertFalse(recordingTrackRoleMatches(RecordingAudioTrack.CALLER_UPLINK, RecordingSource.MEDIA_NODE, 1, uplink))
+        assertEquals(
+            "/calls/$s94CallId/recordings/caller_uplink?source=pixel",
+            ClientApiRoutes.recordingTrack(s94CallId, RecordingAudioTrack.CALLER_UPLINK, RecordingSource.PIXEL),
+        )
+        assertTrue(runCatching {
+            ClientApiRoutes.recordingTrack(s94CallId, RecordingAudioTrack.CALLER_UPLINK, RecordingSource.MEDIA_NODE)
+        }.isFailure)
+    }
+
+    @Test fun s94WithoutUplinkTracksKeepsExistingPairs() {
+        val manifest = requireNotNull(s94Parse(s94PixelV2()))
+        assertTrue(manifest.uplinkArtifacts.isEmpty())
+        assertNull(manifest.artifact(RecordingAudioTrack.CALLER_UPLINK))
+        assertEquals(RecordingPairMode.ORIGINALS, manifest.defaultPairMode)
+        assertTrue(manifest.pairArtifacts(RecordingPairMode.OWNER_JOINED).isEmpty())
+    }
+
+    @Test fun s94MalformedUplinkTracksOrArchiveVersionInvalidateTheDescriptor() {
+        val patches: List<(JSONObject) -> Unit> = listOf(
+            { it.remove("archiveVersion") },
+            { it.remove("uplinkTracks") },
+            { it.put("archiveVersion", 3) },
+            { it.put("archiveVersion", "4") },
+            { it.put("archiveVersion", JSONObject.NULL) },
+            { it.put("uplinkTracks", JSONArray()) },
+            { it.put("uplinkTracks", JSONArray().put(s94Uplink()).put(s94Uplink())) },
+            { it.put("uplinkTracks", JSONObject()) },
+        )
+        patches.forEach { patch ->
+            val value = s94PixelV4().also(patch)
+            assertTrue(value.toString(), runCatching { s94Parse(value) }.isFailure)
+        }
+        val uplinkPatches: List<(JSONObject) -> Unit> = listOf(
+            { it.put("track", "caller_original") },
+            { it.put("sourceRole", "original_capture") },
+            { it.put("mediaType", "audio/ogg") },
+            { it.put("bytes", 43) },
+            { it.put("bytes", -1) },
+            { it.put("sha256", "D".repeat(64)) },
+            { it.put("captureComplete", JSONObject.NULL) },
+            { it.put("gapCount", 0.5) },
+            { it.put("droppedFrames", -1) },
+            { it.put("durationMs", -1) },
+        )
+        uplinkPatches.forEach { patch ->
+            val value = s94PixelV2().put("archiveVersion", 4).put("uplinkTracks", JSONArray().put(s94Uplink().also(patch)))
+            assertTrue(value.toString(), runCatching { s94Parse(value) }.isFailure)
+        }
+    }
+
+    @Test fun s94TranscriptAcceptsUplinkAndDegradesUnknownTracks() {
+        val result = JSONObject()
+            .put("text", "a b c d")
+            .put("segments", JSONArray()
+                .put(segment("remote_original", "customer", "a", 0, 100))
+                .put(segment("caller_uplink", "vodog_user", "b", 100, 200))
+                .put(segment("weird_future_track", "x", "c", 200, 300))
+                .put(segment("caller_original", "vodog_user", "d", 300, 400).put("sourceTrack", "caller_uplink")))
+            .put("providers", JSONArray().put(JSONObject()
+                .put("track", "caller_uplink").put("provider", "xai")
+                .put("model", JSONObject.NULL).put("version", JSONObject.NULL)))
+            .put("advertisingClassification", "normal")
+            .put("includeInReports", true)
+            .put("summary", JSONObject.NULL)
+            .put("actionItems", JSONArray())
+        val envelope = JSONObject().put("transcript", JSONObject()
+            .put("id", "tr-1").put("callId", "call-1").put("status", "succeeded").put("attempts", 1)
+            .put("nextAttemptAt", JSONObject.NULL).put("error", JSONObject.NULL).put("result", result)
+            .put("createdAt", "now").put("updatedAt", "now").put("completedAt", "now"))
+        val parsed = requireNotNull(requireNotNull(parseCallTranscript(envelope)).result)
+        assertEquals(
+            listOf(TranscriptTrack.REMOTE_ORIGINAL, TranscriptTrack.CALLER_UPLINK, TranscriptTrack.OTHER, TranscriptTrack.CALLER_UPLINK),
+            parsed.segments.map { it.track },
+        )
+        assertEquals(TranscriptTrack.CALLER_UPLINK, parsed.providers.single().track)
+        assertEquals("本机上行（含本机接入）", TranscriptTrack.CALLER_UPLINK.label)
+        assertEquals("其他声轨", TranscriptTrack.parse("").label)
     }
 
     private fun pixelTrack(track: String, complete: Boolean, gaps: Long, drops: Long) = JSONObject()

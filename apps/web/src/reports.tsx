@@ -2,6 +2,7 @@ import React, {useEffect,useRef,useState} from 'react';
 import {useReportedError} from './ui-error';
 import {useVisibleRefresh} from './visible-refresh';
 import {CallRecording} from './recording';
+import {preferPixelSource} from './recording-contract';
 import {CallDetailGuard} from './call-detail-guard';
 import {Pager,clampPage,normalizePageSize,readViewState,storedPage,storedText,writeViewState,type PageSize} from './pager';
 import {AiTranscript} from './ai-transcript';
@@ -40,6 +41,8 @@ export type ReportItem={
  unseen?:boolean;
  /** S38：`'pixel'` 是手机拨号盘直拨的通话，录音只有一条声轨。 */
  originatingPlatform?:string|null;
+ /** S94b：机主在 Pixel 本机接入；缺失 = false。 */
+ ownerJoinedLocal?:boolean;
  /** S58：只选录音来源文字，缺失按 Pixel。 */
  gatewayKind?:string|null;
  recordingStatus?:string|null;
@@ -378,7 +381,7 @@ export function CallReports({
        {/* Same order as a 全部通话 row: 回拨 → 发短信 → 更多(屏蔽) → 查看录音 → 查看转录. */}
        <HistoryCallActions remoteNumber={remote||undefined} simId={item.sim?.id} mediaLive={mediaLive} busy={busy} blocked={Boolean(item.blocked)} onRedial={()=>onRedial?.(item)} onSms={()=>onSms?.(item)} onBlock={()=>blockNumber(item)}/>
        <div className="record-media-actions" role="group" aria-label="录音与转录" onClickCapture={()=>onOpen?.(item)}>
-        <CallRecording callId={item.callId} timeZone={itemZone} request={request} preferPixelSource={item.originatingPlatform==='pixel'} gatewayKind={item.gatewayKind}/>
+        <CallRecording callId={item.callId} timeZone={itemZone} request={request} preferPixelSource={preferPixelSource(item)} ownerJoinedLocal={item.ownerJoinedLocal} gatewayKind={item.gatewayKind}/>
         {aiFirst?<AiTranscriptToggle callId={item.callId} request={request}/>:<CallTranscript callId={item.callId} request={request}/>}
        </div>
       </article>

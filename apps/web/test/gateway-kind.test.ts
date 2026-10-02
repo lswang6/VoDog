@@ -13,6 +13,12 @@ test('S58: missing or unknown gatewayKind reads as Pixel',()=>{
  }
 });
 
+test('S91: gateway name wins over the short id; blank or missing name keeps the short id',()=>{
+ assert.equal(gatewayShortLabel('abcdef0123456789','pixel','Pixel 7 Pro'),'Pixel 7 Pro');
+ assert.equal(gatewayShortLabel('abcdef0123456789','dji4g','DJI 4G'),'DJI 4G');
+ for(const name of [undefined,null,'','  '])assert.equal(gatewayShortLabel('abcdef0123456789','dji4g',name),'DJI 4G · abcdef01');
+});
+
 test('S58: dji4g labels follow the contract table',()=>{
  assert.equal(gatewayKindLabel('dji4g').device,'DJI 4G 模组');
  assert.equal(gatewayTag('abcdef0123456789','dji4g'),'DJI-abcdef0123456789');

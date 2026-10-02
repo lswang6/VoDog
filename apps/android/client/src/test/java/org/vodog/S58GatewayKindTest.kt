@@ -2,6 +2,8 @@ package org.vodog
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** S58 追加：网关类型只换文字；缺失/未知按 pixel，wire 值不变。 */
@@ -25,6 +27,18 @@ class S58GatewayKindTest {
         assertEquals("DJI-abcdef01", sim("dji4g").gatewayShortLabel)
         assertEquals("DJI-abcdef0123456789", sim("dji4g").gatewayFullLabel)
         assertEquals("网关待确认", sim(null).copy(gatewayId = null).gatewayShortLabel)
+    }
+
+    @Test fun s91GatewayNameWinsOverShortId() {
+        fun named(name: Any?) = JSONObject().put("id", "sim-1").put("gatewayId", "abcdef0123456789")
+            .put("gatewayKind", "dji4g").put("gatewayName", name ?: JSONObject.NULL).toClientSim()
+        assertEquals("DJI 4G", named("DJI 4G").gatewayShortLabel)
+        assertEquals("DJI 4G · DJI-abcdef01", named("DJI 4G").gatewayFullLabel)
+        for (blank in listOf(null, "", "  ")) {
+            assertEquals("DJI-abcdef01", named(blank).gatewayShortLabel)
+            assertEquals("DJI-abcdef0123456789", named(blank).gatewayFullLabel)
+        }
+        assertEquals(null, sim(null).gatewayName)
     }
 
     @Test fun directDialAndOccupancyWording() {
@@ -52,6 +66,21 @@ class S58GatewayKindTest {
             .put("window", JSONObject().put("timeZone", "Asia/Shanghai").put("fromInclusive", "a").put("toExclusive", "b"))
             .put("items", org.json.JSONArray().put(JSONObject().put("callId", "c").put("startedAt", "t").put("direction", "outbound")
                 .put("sim", JSONObject().put("id", "s").put("label", "SIM")).put("originatingPlatform", "pixel")))
+        assertEquals(RecordingSource.PIXEL, parseCallReport(report).items.single().defaultRecordingSource)
+    }
+
+    @Test fun ownerJoinedLocalOpensDeviceArchiveAndRelabelsServerRecording() {
+        val joined = JSONObject().put("id", "c").put("originatingPlatform", "ios").put("ownerJoinedLocal", true)
+        val item = parseCallHistoryItem(joined, null)
+        assertTrue(item.ownerJoinedLocal)
+        assertEquals(RecordingSource.PIXEL, item.defaultRecordingSource)
+        assertFalse(parseCallHistoryItem(JSONObject().put("id", "c"), null).ownerJoinedLocal)
+        assertEquals("服务器录音（不含本机接入）", RecordingSource.MEDIA_NODE.label(GatewayKind.PIXEL, true))
+        assertEquals("Pixel 原始归档", RecordingSource.PIXEL.label(GatewayKind.PIXEL, true))
+        val report = JSONObject()
+            .put("window", JSONObject().put("timeZone", "Asia/Shanghai").put("fromInclusive", "a").put("toExclusive", "b"))
+            .put("items", org.json.JSONArray().put(JSONObject().put("callId", "c").put("startedAt", "t").put("direction", "outbound")
+                .put("sim", JSONObject().put("id", "s").put("label", "SIM")).put("ownerJoinedLocal", true)))
         assertEquals(RecordingSource.PIXEL, parseCallReport(report).items.single().defaultRecordingSource)
     }
 }

@@ -19,6 +19,53 @@ struct PagedEnvelope<T: Decodable & Sendable>: Decodable, Sendable {
     var supported: Bool { totalPages != nil }
 }
 
+/// S89: keyset cursor of `GET sms`. An older Control omits `nextCursor`, which decodes as nil = last page.
+struct SMSPageCursor: Codable, Sendable, Equatable { let before: String; let beforeId: String }
+struct SMSPageEnvelope<T: Codable & Sendable>: Codable, Sendable { let items: [T]; let nextCursor: SMSPageCursor? }
+
+/// S89: every SMS refresh walks the whole list from page one, then the caller replaces wholesale (S32/S88
+/// "missing from the poll = deleted" depends on it). Any page error throws, so the caller keeps its last list.
+/// ponytail: fetches everything on every poll; at ~2–3k rows or ~500 KB per refresh switch to a thread
+/// summary endpoint + per-thread paging (or tombstone sync).
+enum SMSFullListPolicy {
+    static let pageLimit = 500
+    static let maxPages = 20
+
+    static func query(_ cursor: SMSPageCursor?) -> [URLQueryItem] {
+        var items = [URLQueryItem(name: "limit", value: String(pageLimit))]
+        if let cursor {  // URLComponents percent-encodes the ISO timestamp.
+            items += [URLQueryItem(name: "before", value: cursor.before), URLQueryItem(name: "beforeId", value: cursor.beforeId)]
+        }
+        return items
+    }
+
+    /// Rollback safety: a pre-S89 Control answers 400 to `limit=500` on page one; then one `limit=100` request is
+    /// the whole result, unpaged. Only that case falls back — any other error, or a 400 on a later page, throws.
+    static let legacyQuery = [URLQueryItem(name: "limit", value: "100")]
+
+    /// Page order, first occurrence of an id wins. `capped` = stopped at `maxPages` with a cursor still pending.
+    /// `fetch` gets the exact query items of each request.
+    static func fetchAll<T: Identifiable & Codable & Sendable>(
+        fetch: ([URLQueryItem]) async throws -> SMSPageEnvelope<T>
+    ) async throws -> (items: [T], capped: Bool) where T.ID: Hashable {
+        var items: [T] = []
+        var seen = Set<T.ID>()
+        var cursor: SMSPageCursor?
+        for pageIndex in 0..<maxPages {
+            let page: SMSPageEnvelope<T>
+            do {
+                page = try await fetch(query(cursor))
+            } catch APIError.server(400, _, _) where pageIndex == 0 {
+                return (try await fetch(legacyQuery).items, false)
+            }
+            for item in page.items where seen.insert(item.id).inserted { items.append(item) }
+            guard let next = page.nextCursor else { return (items, false) }
+            cursor = next
+        }
+        return (items, true)
+    }
+}
+
 /// S58：网关类型只用来选文字，不用来判断能力；缺失或未知一律按 Pixel。
 enum GatewayKind: Equatable, Sendable {
     case pixel, dji4g
@@ -50,6 +97,8 @@ struct SIMChannel: Codable, Identifiable, Sendable {
     let settings: SIMSettings?
     /// S58：`pixel` | `dji4g`；旧 Control 不发。
     var gatewayKind: String? = nil
+    /// S91：`gateways.name`；旧 Control 不发。
+    var gatewayName: String? = nil
 }
 
 struct SIMSettings: Codable, Sendable, Equatable {
@@ -95,6 +144,8 @@ struct CallRecord: Codable, Identifiable, Sendable {
     let answeredByPlatform: String?
     let answeredByDevice: String?
     let originatingPlatform: String?
+    /// S94b: 机主在 Pixel 本机接入了 AI 代接；缺失 = false。`var` + 默认值让既有成员初始化器不变。
+    var ownerJoinedLocal: Bool? = nil
     let claimedByCurrentSession: Bool?
     let failureReason: String?
     let recordingStatus: String?
@@ -303,7 +354,7 @@ struct TranscriptSegment: Codable, Identifiable, Sendable {
     var speakerTitle: String {
         switch (track, speaker) {
         case ("remote_original", _), (_, "remote"): "对方"
-        case ("caller_original", _), (_, "vodog_user"): "本人"
+        case ("caller_original", _), ("caller_uplink", _), (_, "vodog_user"): "本人"
         default: speaker
         }
     }
@@ -312,6 +363,7 @@ struct TranscriptSegment: Codable, Identifiable, Sendable {
         switch track {
         case "remote_original": "对方原声"
         case "caller_original": "我的原声"
+        case "caller_uplink": "本机上行（含本机接入）"
         default: "其他声轨"
         }
     }
@@ -334,6 +386,7 @@ struct TranscriptBlock: Identifiable, Sendable {
         switch track {
         case "remote_original": "对方原声"
         case "caller_original": "我的原声"
+        case "caller_uplink": "本机上行（含本机接入）"
         default: "其他声轨"
         }
     }
@@ -457,6 +510,8 @@ struct CallReportItem: Decodable, Identifiable, Sendable {
     let aiTranscriptUrl: String?
     /// S38 报告 DTO 已带；`pixel` = 设备上直拨，没有服务器录音。
     let originatingPlatform: String?
+    /// S94b: 缺失 = false。
+    let ownerJoinedLocal: Bool
     /// S58: `pixel | dji4g`，缺失按 Pixel；只换录音来源文字。
     let gatewayKind: String?
     /// Pre-S22 field, kept so an old server still round-trips; the UI no longer prints 纳入/排除 wording.
@@ -488,7 +543,7 @@ struct CallReportItem: Decodable, Identifiable, Sendable {
         case blocked, blockedEntryId, sim, gatewayTimeZone, answerMode, answeredByPlatform, recordingStatus
         case transcriptState, transcriptError, summary, actionItems, classification
         case blockRecommended, blockCategory, blockReason, hasAiTranscript, transcriptCompletedAt
-        case callUrl, transcriptUrl, recordingUrl, aiTranscriptUrl, advertisingClassification, originatingPlatform, gatewayKind, unseen
+        case callUrl, transcriptUrl, recordingUrl, aiTranscriptUrl, advertisingClassification, originatingPlatform, ownerJoinedLocal, gatewayKind, unseen
         case `internal`, peerSimLabel, failureReason
     }
 
@@ -525,6 +580,7 @@ struct CallReportItem: Decodable, Identifiable, Sendable {
         aiTranscriptUrl = try c.decodeIfPresent(String.self, forKey: .aiTranscriptUrl)
         advertisingClassification = try c.decodeIfPresent(String.self, forKey: .advertisingClassification)
         originatingPlatform = try c.decodeIfPresent(String.self, forKey: .originatingPlatform)
+        ownerJoinedLocal = try c.decodeIfPresent(Bool.self, forKey: .ownerJoinedLocal) ?? false
         gatewayKind = try c.decodeIfPresent(String.self, forKey: .gatewayKind)
         unseen = try c.decodeIfPresent(Bool.self, forKey: .unseen) ?? false
         isInternal = try c.decodeIfPresent(Bool.self, forKey: .`internal`) ?? false
@@ -553,12 +609,13 @@ struct RecordingEnvelope: Decodable, Sendable { let recording: RecordingManifest
 enum RecordingSource: String, CaseIterable, Sendable {
     case mediaNode = "media_node"
     case pixel
-    func title(gatewayKind: String? = nil) -> String {
-        self == .mediaNode ? "服务器录音" : GatewayKind(gatewayKind).archiveTitle
+    func title(gatewayKind: String? = nil, ownerJoinedLocal: Bool = false) -> String {
+        self == .mediaNode ? (ownerJoinedLocal ? "服务器录音（不含本机接入）" : "服务器录音") : GatewayKind(gatewayKind).archiveTitle
     }
     /// 设备上直拨的通话没有服务器录音，只有设备原始归档（`source=pixel`），默认直接打开它。
-    static func defaultSource(originatingPlatform: String?) -> RecordingSource {
-        originatingPlatform == "pixel" ? .pixel : .mediaNode
+    /// S94b: 机主本机接入的通话，服务器录音不含机主声音，同样默认设备归档。
+    static func defaultSource(originatingPlatform: String?, ownerJoinedLocal: Bool = false) -> RecordingSource {
+        originatingPlatform == "pixel" || ownerJoinedLocal ? .pixel : .mediaNode
     }
 }
 
@@ -572,6 +629,9 @@ struct RecordingManifest: Decodable, Sendable {
     let captureComplete: Bool?
     let artifacts: [RecordingArtifact]
     let derivedArtifacts: [DerivedRecordingArtifact]
+    /// S94: optional Pixel `uplinkTracks` (with `archiveVersion: 4`). Kept outside `RecordingTrack` so the
+    /// two-original-track checks in `isValid` / `isEmptyCapture` stay unchanged.
+    let uplinkArtifacts: [UplinkRecordingArtifact]
 
     var complete: Bool { archiveComplete }
 
@@ -592,6 +652,17 @@ struct RecordingManifest: Decodable, Sendable {
               let callerPlayout = derivedArtifacts.first(where: { $0.track == "caller_playout" }),
               callerPlayout.bytes > 0 else { return [] }
         return [remote.playbackArtifact, callerPlayout.playbackArtifact]
+    }
+
+    /// S94: remote original + the gateway uplink capture, which also carries the owner speaking on the Pixel.
+    var ownerJoinedPlaybackArtifacts: [PlaybackArtifact] {
+        guard source == .pixel, let remote = artifact(for: .remoteOriginal), remote.bytes > 0,
+              let uplink = uplinkArtifacts.first, uplink.bytes > 0 else { return [] }
+        return [remote.playbackArtifact, uplink.playbackArtifact]
+    }
+
+    var defaultTogetherMode: RecordingPlaybackController.TogetherMode {
+        ownerJoinedPlaybackArtifacts.isEmpty ? .originals : .ownerJoined
     }
 
     /// A WAV header is 44 bytes and the Ogg/Opus header pages the media node writes are 95; anything at or below
@@ -624,19 +695,20 @@ struct RecordingManifest: Decodable, Sendable {
         switch source {
         case .mediaNode:
             return version == 1 && archiveId == nil && captureComplete == nil
-                && derivedArtifacts.isEmpty
+                && derivedArtifacts.isEmpty && uplinkArtifacts.isEmpty
                 && artifacts.allSatisfy { $0.mediaType == "audio/ogg" && $0.captureComplete == nil && $0.bytes <= 512 * 1024 * 1024 }
         case .pixel:
             return [2, 3].contains(version) && archiveId.flatMap(UUID.init(uuidString:)) != nil && archiveComplete
                 && captureComplete == artifacts.allSatisfy { $0.captureComplete == true }
                 && artifacts.allSatisfy { $0.mediaType == "audio/wav" && $0.bytes >= 44 && $0.captureComplete != nil }
                 && (version == 2 ? derivedArtifacts.isEmpty : derivedArtifacts.count == 1 && derivedArtifacts.allSatisfy(\.isValid))
+                && uplinkArtifacts.count <= 1 && uplinkArtifacts.allSatisfy(\.isValid)
         }
     }
 
     private enum CodingKeys: String, CodingKey {
         case source, version, archiveId, callId, manifestSha256, finalizedAt, complete, archiveComplete, captureComplete
-        case artifacts, tracks, derivedTracks, timeline, startedAt, endedAt
+        case artifacts, tracks, derivedTracks, timeline, startedAt, endedAt, archiveVersion, uplinkTracks
     }
     private struct PixelTrack: Decodable {
         let track: RecordingTrack; let mediaType: String; let bytes: Int64; let sha256: String
@@ -655,7 +727,7 @@ struct RecordingManifest: Decodable, Sendable {
             guard wireSource == nil || wireSource == RecordingSource.mediaNode.rawValue else {
                 throw DecodingError.dataCorruptedError(forKey: .source, in: c, debugDescription: "v1 source mismatch")
             }
-            source = .mediaNode; archiveId = nil; captureComplete = nil; derivedArtifacts = []
+            source = .mediaNode; archiveId = nil; captureComplete = nil; derivedArtifacts = []; uplinkArtifacts = []
             finalizedAt = try c.decode(String.self, forKey: .finalizedAt)
             // An aborted media-node recording publishes `complete:false` (and older nodes omit the key). Both must
             // decode — `isEmptyCapture` then reports it as an empty recording instead of a manifest mismatch.
@@ -706,6 +778,15 @@ struct RecordingManifest: Decodable, Sendable {
                 }
                 derivedArtifacts = []
             }
+            // S94: `archiveVersion: 4` and exactly one valid `uplinkTracks` entry appear together or not at all.
+            let archiveVersion = try c.decodeIfPresent(Int.self, forKey: .archiveVersion)
+            let uplinks = try c.decodeIfPresent([UplinkRecordingArtifact].self, forKey: .uplinkTracks)
+            switch (archiveVersion, uplinks) {
+            case (nil, nil): uplinkArtifacts = []
+            case (4?, let uplinks?) where uplinks.count == 1 && uplinks.allSatisfy(\.isValid): uplinkArtifacts = uplinks
+            default:
+                throw DecodingError.dataCorruptedError(forKey: .uplinkTracks, in: c, debugDescription: "v4 uplink track mismatch")
+            }
             let timeline = try c.decode(Timeline.self, forKey: .timeline)
             guard timeline.mediaType == "application/x-ndjson", timeline.bytes >= 0,
                   timeline.bytes <= 1024 * 1024 * 1024, RecordingArtifact.validSHA(timeline.sha256) else {
@@ -732,6 +813,28 @@ struct DerivedRecordingArtifact: Decodable, Sendable {
         track == "caller_playout" && sourceRole == "derived_playout" && mediaType == "audio/wav"
             && bytes >= 44 && bytes <= 512 * 1024 * 1024 && RecordingArtifact.validSHA(sha256)
             && gapCount >= 0 && recoveryFrames >= 0
+    }
+
+    var playbackArtifact: PlaybackArtifact {
+        .init(path: track, mediaType: mediaType, bytes: bytes, sha256: sha256, durationMs: durationMs)
+    }
+}
+
+struct UplinkRecordingArtifact: Decodable, Sendable {
+    let track: String
+    let sourceRole: String
+    let mediaType: String
+    let bytes: Int64
+    let sha256: String
+    let captureComplete: Bool
+    let gapCount: Int64
+    let droppedFrames: Int64
+    let durationMs: Int64?
+
+    var isValid: Bool {
+        track == "caller_uplink" && sourceRole == "uplink_capture" && mediaType == "audio/wav"
+            && bytes >= 44 && bytes <= 512 * 1024 * 1024 && RecordingArtifact.validSHA(sha256)
+            && gapCount >= 0 && droppedFrames >= 0
     }
 
     var playbackArtifact: PlaybackArtifact {

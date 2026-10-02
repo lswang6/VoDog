@@ -350,7 +350,7 @@ struct ContactCardView: View {
         if !contact.phones.isEmpty {
             Section("电话") {
                 ForEach(contact.phones) { phone in
-                    LabeledContent(phone.label ?? "电话") {
+                    LabeledContent(ContactLabelDisplay.text(phone.label, fallback: "电话")) {
                         Text(phone.displayNumber).monospacedDigit().textSelection(.enabled)
                     }
                 }
@@ -359,7 +359,7 @@ struct ContactCardView: View {
         if !contact.emails.isEmpty {
             Section("邮箱") {
                 ForEach(contact.emails) { email in
-                    LabeledContent(email.label ?? "邮箱") { Text(email.address).textSelection(.enabled) }
+                    LabeledContent(ContactLabelDisplay.text(email.label, fallback: "邮箱")) { Text(email.address).textSelection(.enabled) }
                 }
             }
         }
@@ -367,7 +367,7 @@ struct ContactCardView: View {
             Section("地址") {
                 ForEach(contact.addresses) { address in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(address.label ?? "地址").font(.caption).foregroundStyle(.secondary)
+                        Text(ContactLabelDisplay.text(address.label, fallback: "地址")).font(.caption).foregroundStyle(.secondary)
                         Text(address.displayText).textSelection(.enabled)
                     }
                 }

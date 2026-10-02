@@ -289,30 +289,6 @@ internal object GatewayPassiveCallRecorder {
 
     private fun pcmDurationUs(bytes: Int): Long = bytes * 1_000_000L / (PASSIVE_SAMPLE_RATE * 2L)
 
-    @SuppressLint("MissingPermission")
-    private fun buildPassiveCapture(source: Int): AudioRecord {
-        val min = AudioRecord.getMinBufferSize(
-            PASSIVE_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-        )
-        check(min > 0) { "AudioRecord buffer unavailable: $min" }
-        val record = AudioRecord.Builder()
-            .setAudioSource(source)
-            .setAudioFormat(AudioFormat.Builder()
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setSampleRate(PASSIVE_SAMPLE_RATE)
-                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                .build())
-            .setBufferSizeInBytes(maxOf(min * 2, PASSIVE_FRAME_BYTES * 4))
-            .build()
-        return try {
-            check(record.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord source $source unavailable" }
-            record
-        } catch (error: Exception) {
-            runCatching { record.release() }
-            throw error
-        }
-    }
-
     private fun failed(phase: String, error: Throwable, callId: String? = null) {
         runCatching {
             GatewayDiag.log(
@@ -324,11 +300,73 @@ internal object GatewayPassiveCallRecorder {
         }
     }
 
-    private const val PASSIVE_SAMPLE_RATE = 16_000
-    private const val PASSIVE_FRAME_BYTES = 640
     private const val CONFIG_INTERVAL_MS = 1_000L
     private const val STATS_INTERVAL_MS = 10_000L
     private const val ATTEMPT_INTERVAL_MS = 10_000L
     private const val FRAMES_PER_ENABLED_CHECK = 50L
     private const val MAX_TRACKED_ATTEMPTS = 32
+}
+
+internal const val PASSIVE_SAMPLE_RATE = 16_000
+internal const val PASSIVE_FRAME_BYTES = 640
+
+/** S38 §4 / S94: a 16 kHz mono s16le AudioRecord on [source]; throws (and releases) when unavailable. */
+@SuppressLint("MissingPermission")
+internal fun buildPassiveCapture(source: Int): AudioRecord {
+    val min = AudioRecord.getMinBufferSize(
+        PASSIVE_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+    )
+    check(min > 0) { "AudioRecord buffer unavailable: $min" }
+    val record = AudioRecord.Builder()
+        .setAudioSource(source)
+        .setAudioFormat(AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(PASSIVE_SAMPLE_RATE)
+            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+            .build())
+        .setBufferSizeInBytes(maxOf(min * 2, PASSIVE_FRAME_BYTES * 4))
+        .build()
+    return try {
+        check(record.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord source $source unavailable" }
+        record
+    } catch (error: Exception) {
+        runCatching { record.release() }
+        throw error
+    }
+}
+
+/** S94: VOICE_UPLINK for a bridged media session, with the S49 silenced/loss diagnostics. */
+internal class AudioRecordUplinkSource(private val context: Context, private val callId: String) : UplinkPcmSource {
+    private val record = buildPassiveCapture(MediaRecorder.AudioSource.VOICE_UPLINK)
+    private val diag = PassiveCaptureDiagnostics(record, "caller_uplink", callId, "media.uplink_capture")
+
+    override fun start() {
+        val bypassGranted = context.checkSelfPermission(CONCURRENT_CAPTURE_PERMISSION) == PackageManager.PERMISSION_GRANTED
+        diag.attach()
+        record.startRecording()
+        check(record.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "VOICE_UPLINK did not start" }
+        diag.started()
+        GatewayDiag.log("media.uplink_capture.started", mapOf("sessionId" to record.audioSessionId,
+            "concurrentCaptureBypassGranted" to bypassGranted), callId = callId,
+            level = if (bypassGranted) "info" else "warn")
+    }
+
+    override fun read(buffer: ByteArray): Int {
+        val read = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
+        diag.stats.recordRead(buffer, read, buffer.size)
+        if (read > 0) diag.observedRead()
+        return read
+    }
+
+    override fun poll() = diag.poll()
+    override val silenced: Boolean get() = diag.isSilenced()
+    override val incomplete: Boolean get() = diag.isIncomplete()
+    override fun report(final: Boolean, terminalState: String) = diag.report(final, terminalState)
+    override fun unblock() { runCatching { record.stop() } }
+
+    override fun close() {
+        diag.close()
+        runCatching { record.stop() }
+        runCatching { record.release() }
+    }
 }

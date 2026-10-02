@@ -80,6 +80,13 @@ object ClientApiRoutes {
     fun sim(simId: String) = "/sims/${encodePathSegment(simId)}"
     fun simSettings(simId: String) = "/sims/${encodePathSegment(simId)}/settings"
     fun call(callId: String) = "/calls/${encodePathSegment(callId)}"
+    /** S89 键集分页：`before` 是 ISO 时间，带 `+` 时区偏移时必须编码。 */
+    internal fun smsPage(cursor: SmsPagingPolicy.Cursor?): String {
+        val base = "$SMS?limit=${SmsPagingPolicy.PAGE_LIMIT}"
+        return cursor?.let { "$base&before=${query(it.before)}&beforeId=${query(it.beforeId)}" } ?: base
+    }
+    /** S89 回滚兜底：旧 Control 对 `limit=500` 回 400，退回它接受的上限。 */
+    const val SMS_LEGACY = "$SMS?limit=100"
     fun claimCall(callId: String) = "/calls/${encodePathSegment(callId)}/claim"
     fun endCall(callId: String) = "/calls/${encodePathSegment(callId)}/end"
     /** S72 D3: 手机在系统通话中，同 iOS 上报 owner 忙线。 */
@@ -99,7 +106,8 @@ object ClientApiRoutes {
         /** S36 C4: only `mp3` (server-side transcode) — playback keeps the原始 format, so it passes null. */
         format: String? = null,
     ): String {
-        require(track != RecordingAudioTrack.CALLER_PLAYOUT || source == RecordingSource.PIXEL) {
+        require((track != RecordingAudioTrack.CALLER_PLAYOUT && track != RecordingAudioTrack.CALLER_UPLINK) ||
+            source == RecordingSource.PIXEL) {
             "derived playback is only available from Pixel archives"
         }
         require(format == null || format == "mp3") { "只支持 mp3 转码导出" }
@@ -543,7 +551,10 @@ class ClientApi internal constructor(
         page: Int = 1,
         pageSize: Int = RecordsPagingPolicy.DEFAULT_PAGE_SIZE,
     ): Page<JSONObject> = collectionPage(ClientApiRoutes.interceptionsPage(page, pageSize), pageSize)
-    fun sms(): List<JSONObject> = collection(ClientApiRoutes.SMS)
+    fun sms(): List<JSONObject> = SmsPagingPolicy.fetchAll(
+        fetchPage = { cursor -> SmsPagingPolicy.readPage(request("GET", ClientApiRoutes.smsPage(cursor))) },
+        fetchLegacy = { collection(ClientApiRoutes.SMS_LEGACY) },
+    )
     /**
      * S22 报告 Tab. Only the time zone is asserted: an explicit `from`/`to` window comes back without
      * a `period`, and the server is free to clamp the range it actually served.

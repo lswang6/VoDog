@@ -591,6 +591,9 @@ test("device resumes exact chunks, finalizes through strict validator, and owner
     assert.equal(response.statusCode, 503, response.body);
     const published = JSON.parse((await readFile(join(root, callId, uploadId, "manifest.json"))).toString());
     assert.equal(published.archiveId, uploadId, "failure occurred after manifest publication");
+    // S94 golden: a v2 publication keeps exactly the pre-v4 key set.
+    assert.deepEqual(Object.keys(published), ["source", "version", "archiveId", "callId", "manifestSha256",
+      "archiveComplete", "captureComplete", "startedAt", "endedAt", "tracks", "timeline"]);
     assert.equal((await db.query("SELECT state FROM pixel_recording_archives WHERE id=$1", [uploadId])).rows[0].state, "uploading");
     const hidden = await app.inject({method:"GET", url:`/api/v1/calls/${callId}/recordings?source=pixel`, headers:bearer("owner-archive-token")});
     assert.equal(hidden.statusCode, 200, hidden.body);
@@ -853,11 +856,161 @@ test("v3 archives four immutable objects and authorizes separate derived playbac
   assert.equal(defaultSource.statusCode, 404, defaultSource.body);
   const manifestPath = join(root, callId, uploadId, "manifest.json");
   const immutable = await readFile(manifestPath, "utf8");
+  // S94 golden: a v3 publication keeps exactly the pre-v4 key set, so published fingerprints stay valid.
+  assert.deepEqual(Object.keys(JSON.parse(immutable)), ["source", "version", "archiveId", "callId", "manifestSha256",
+    "archiveComplete", "captureComplete", "startedAt", "endedAt", "tracks", "derivedTracks", "timeline"]);
+  assert.equal(descriptor.json().recording.archiveVersion, undefined);
+  assert.equal(descriptor.json().recording.uplinkTracks, undefined);
   try {
     await writeFile(manifestPath, JSON.stringify({ ...JSON.parse(immutable), captureSource: "promoted_derived" }));
     const tampered = await app.inject({ method: "GET", url: playbackUrl, headers: bearer("owner-archive-token") });
     assert.equal(tampered.statusCode, 503, tampered.body);
   } finally { await writeFile(manifestPath, immutable); }
+});
+
+function uplinkWav() {
+  const value = wav();
+  for (let offset = 44; offset < value.length; offset += 2) value.writeInt16LE(((offset * 37) % 2000) - 1000, offset);
+  return value;
+}
+async function putObjects(target: FastifyInstance, uploadId: string, objects: (readonly [string, Buffer])[]) {
+  for (const [name, data] of objects) {
+    const put = await target.inject({ method: "PUT", url: `/api/v1/gateway/recording-archives/${uploadId}/objects/${name}`,
+      headers: { ...bearer(deviceToken), "content-type": "application/octet-stream",
+        "content-range": `bytes 0-${data.length - 1}/${data.length}`,
+        digest: `sha-256=${createHash("sha256").update(data).digest("base64")}` }, payload: data });
+    assert.equal(put.statusCode, 200, put.body);
+  }
+}
+
+test("v4 archives the owner uplink beside unchanged v2-shaped tracks and serves it to pixel readers only", async () => {
+  await db.query(`DELETE FROM pixel_recording_archives WHERE call_id=$1`, [callId]);
+  const fixture = archiveFixture();
+  const uplinkOriginal = uplinkWav(), uplink = gzipSync(uplinkOriginal, { mtime: 0 } as any);
+  const timelineOriginal = Buffer.from('{"event":"start","timestampUs":0}\n' +
+    '{"event":"frame","track":"caller_uplink","timestampUs":0,"sourceTimestampUs":1000,"fileOffset":44,"sampleCount":320}\n' +
+    '{"event":"gap","track":"caller_uplink","timestampUs":20000,"durationUs":20000}\n' +
+    '{"event":"stop","state":"ended"}\n');
+  const timeline = gzipSync(timelineOriginal, { mtime: 0 } as any);
+  const uplinkEntry = { track: "caller_uplink", sourceRole: "uplink_capture", objectName: "caller_uplink.wav.gz",
+    mediaType: "audio/wav", pcm: fixture.body.tracks[0].pcm,
+    compressedBytes: uplink.length, compressedSha256: sha(uplink),
+    originalBytes: uplinkOriginal.length, originalSha256: sha(uplinkOriginal),
+    pcmBytes: 640, gapCount: 1, droppedFrames: 0, captureComplete: false };
+  const body = { ...fixture.body, version: 4, uplinkTracks: [uplinkEntry], timeline: { ...fixture.body.timeline,
+    compressedBytes: timeline.length, compressedSha256: sha(timeline),
+    originalBytes: timelineOriginal.length, originalSha256: sha(timelineOriginal) } };
+  const url = `/api/v1/gateway/calls/${callId}/recording-archives`;
+  for (const invalid of [
+    { ...body, uplinkTracks: undefined },
+    { ...body, uplinkTracks: [] },
+    { ...body, uplinkTracks: [uplinkEntry, uplinkEntry] },
+    { ...body, uplinkTracks: [{ ...uplinkEntry, objectName: "caller_original.wav.gz" }] },
+    { ...body, uplinkTracks: [{ ...uplinkEntry, sourceRole: "original_capture" }] },
+    { ...body, uplinkTracks: [{ ...uplinkEntry, extra: true }] },
+    { ...body, derivedTracks: [] },
+    { ...body, version: 3 },
+  ]) {
+    const rejected = await app.inject({ method: "POST", url, headers: bearer(deviceToken), payload: invalid });
+    assert.equal(rejected.statusCode, 400, rejected.body);
+  }
+  const init = await app.inject({ method: "POST", url, headers: bearer(deviceToken), payload: body });
+  assert.equal(init.statusCode, 200, init.body);
+  const uploadId = init.json().upload.id;
+  assert.deepEqual(init.json().upload.objects.map((item: any) => item.name).sort(),
+    ["caller_original.wav.gz", "caller_uplink.wav.gz", "remote_original.wav.gz", "timeline.jsonl.gz"]);
+  await putObjects(app, uploadId, [["remote_original.wav.gz", fixture.remote], ["caller_original.wav.gz", fixture.caller],
+    ["caller_uplink.wav.gz", uplink], ["timeline.jsonl.gz", timeline]]);
+  const finalized = await app.inject({ method: "POST", url: `/api/v1/gateway/recording-archives/${uploadId}/finalize`, headers: bearer(deviceToken) });
+  assert.equal(finalized.statusCode, 200, finalized.body);
+  assert.equal(finalized.json().archive.version, 4);
+  const replayed = await app.inject({ method: "POST", url: `/api/v1/gateway/recording-archives/${uploadId}/finalize`, headers: bearer(deviceToken) });
+  assert.equal(replayed.json().archive.version, 4);
+  const descriptor = await app.inject({ method: "GET", url: `/api/v1/calls/${callId}/recordings?source=pixel`, headers: bearer("owner-archive-token") });
+  assert.equal(descriptor.statusCode, 200, descriptor.body);
+  const recording = descriptor.json().recording;
+  assert.equal(recording.version, 2);
+  assert.equal(recording.archiveVersion, 4);
+  assert.equal(recording.derivedTracks, undefined);
+  assert.deepEqual(recording.tracks.map((item: any) => item.track), ["remote_original", "caller_original"]);
+  // Uplink completeness never feeds the archive-level flag; caller_original's own `false` does here.
+  assert.equal(recording.captureComplete, false);
+  assert.deepEqual(recording.uplinkTracks, [{ track: "caller_uplink", sourceRole: "uplink_capture", mediaType: "audio/wav",
+    bytes: uplinkOriginal.length, sha256: sha(uplinkOriginal), captureComplete: false, gapCount: 1, droppedFrames: 0, durationMs: 20 }]);
+  const published = JSON.parse(await readFile(join(root, callId, uploadId, "manifest.json"), "utf8"));
+  assert.equal(published.uplinkTracks[0].durationMs, undefined);
+  const trackUrl = `/api/v1/calls/${callId}/recordings/caller_uplink`;
+  const playback = await app.inject({ method: "GET", url: `${trackUrl}?source=pixel`, headers: bearer("owner-archive-token") });
+  assert.equal(playback.statusCode, 200, playback.body);
+  assert.deepEqual(playback.rawPayload, uplinkOriginal);
+  assert.equal((await app.inject({ method: "GET", url: trackUrl, headers: bearer("owner-archive-token") })).statusCode, 404);
+  assert.equal((await app.inject({ method: "GET", url: `${trackUrl}?source=pixel`, headers: bearer("other-archive-token") })).statusCode, 404);
+  // The conversation mix must take caller_uplink: with caller_original unreadable it still succeeds.
+  const callerPath = join(root, callId, uploadId, "caller_original.wav");
+  const callerBytes = await readFile(callerPath);
+  const cacheDir = await mkdtemp(join(tmpdir(), "vodog-v4-mp3-"));
+  const mixer = await buildApp(db, config(root, validator, { RECORDING_MP3_CACHE_DIR: cacheDir }) as any);
+  try {
+    await writeFile(callerPath, Buffer.alloc(callerBytes.length));
+    const mixed = await mixer.inject({ method: "GET", url: `/api/v1/calls/${callId}/recordings/conversation?source=pixel&format=mp3`, headers: bearer("owner-archive-token") });
+    assert.equal(mixed.statusCode, 200, mixed.body);
+    const uplinkMp3 = await mixer.inject({ method: "GET", url: `${trackUrl}?source=pixel&format=mp3`, headers: bearer("owner-archive-token") });
+    assert.equal(uplinkMp3.statusCode, 200, uplinkMp3.body);
+    const corrupted = await mixer.inject({ method: "GET", url: `/api/v1/calls/${callId}/recordings/caller_original?source=pixel&format=mp3`, headers: bearer("owner-archive-token") });
+    assert.equal(corrupted.statusCode, 503, corrupted.body);
+  } finally {
+    await writeFile(callerPath, callerBytes);
+    await mixer.close();
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
+test("v4 with derived playout archives five objects and publishes version 3 plus the uplink", async () => {
+  await db.query(`DELETE FROM pixel_recording_archives WHERE call_id=$1`, [callId]);
+  const fixture = archiveFixture();
+  const uplinkOriginal = uplinkWav(), uplink = gzipSync(uplinkOriginal, { mtime: 0 } as any);
+  const { droppedFrames: _drops, captureComplete: _complete, ...originalFacts } = fixture.body.tracks[1];
+  const body = { ...fixture.body, version: 4,
+    derivedTracks: [{ ...originalFacts, track: "caller_playout", objectName: "caller_playout.wav.gz", sourceRole: "derived_playout",
+      gapCount: 0, recoveryFrames: 1, playoutComplete: true }],
+    uplinkTracks: [{ ...originalFacts, track: "caller_uplink", objectName: "caller_uplink.wav.gz", sourceRole: "uplink_capture",
+      compressedBytes: uplink.length, compressedSha256: sha(uplink), originalBytes: uplinkOriginal.length, originalSha256: sha(uplinkOriginal),
+      gapCount: 0, droppedFrames: 0, captureComplete: true }] };
+  const init = await app.inject({ method: "POST", url: `/api/v1/gateway/calls/${callId}/recording-archives`, headers: bearer(deviceToken), payload: body });
+  assert.equal(init.statusCode, 200, init.body);
+  const uploadId = init.json().upload.id;
+  assert.equal(init.json().upload.objects.length, 5);
+  await putObjects(app, uploadId, [["remote_original.wav.gz", fixture.remote], ["caller_original.wav.gz", fixture.caller],
+    ["caller_playout.wav.gz", fixture.caller], ["caller_uplink.wav.gz", uplink], ["timeline.jsonl.gz", fixture.timeline]]);
+  const finalized = await app.inject({ method: "POST", url: `/api/v1/gateway/recording-archives/${uploadId}/finalize`, headers: bearer(deviceToken) });
+  assert.equal(finalized.statusCode, 200, finalized.body);
+  assert.equal(finalized.json().archive.version, 4);
+  const recording = (await app.inject({ method: "GET", url: `/api/v1/calls/${callId}/recordings?source=pixel`, headers: bearer("owner-archive-token") })).json().recording;
+  assert.equal(recording.version, 3);
+  assert.equal(recording.archiveVersion, 4);
+  assert.equal(recording.derivedTracks.length, 1);
+  assert.equal(recording.derivedTracks[0].durationMs, 20);
+  assert.equal(recording.uplinkTracks[0].durationMs, 20);
+  assert.equal(recording.uplinkTracks[0].captureComplete, true);
+  assert.equal(recording.captureComplete, false);
+  const playout = await app.inject({ method: "GET", url: `/api/v1/calls/${callId}/recordings/caller_playout?source=pixel`, headers: bearer("owner-archive-token") });
+  assert.equal(playout.statusCode, 200, playout.body);
+});
+
+test("v4 timeline frames for the uplink are rejected when the archive has no uplink object", async () => {
+  await db.query(`DELETE FROM pixel_recording_archives WHERE call_id=$1`, [callId]);
+  const fixture = archiveFixture();
+  const timelineOriginal = Buffer.from('{"event":"start","timestampUs":0}\n' +
+    '{"event":"frame","track":"caller_uplink","timestampUs":0,"sourceTimestampUs":1000,"fileOffset":44,"sampleCount":320}\n');
+  const timeline = gzipSync(timelineOriginal, { mtime: 0 } as any);
+  const body = { ...fixture.body, timeline: { ...fixture.body.timeline, compressedBytes: timeline.length, compressedSha256: sha(timeline),
+    originalBytes: timelineOriginal.length, originalSha256: sha(timelineOriginal) } };
+  const init = await app.inject({ method: "POST", url: `/api/v1/gateway/calls/${callId}/recording-archives`, headers: bearer(deviceToken), payload: body });
+  assert.equal(init.statusCode, 200, init.body);
+  const uploadId = init.json().upload.id;
+  await putObjects(app, uploadId, [["remote_original.wav.gz", fixture.remote], ["caller_original.wav.gz", fixture.caller], ["timeline.jsonl.gz", timeline]]);
+  const finalized = await app.inject({ method: "POST", url: `/api/v1/gateway/recording-archives/${uploadId}/finalize`, headers: bearer(deviceToken) });
+  assert.equal(finalized.statusCode, 422, finalized.body);
 });
 
 // The chunk PUT now validates in one transaction, writes the file with no transaction

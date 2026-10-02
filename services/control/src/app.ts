@@ -56,7 +56,9 @@ import type {
 import type { PoolClient } from "pg";
 import { z, ZodError } from "zod";
 import type { Config } from "./config.js";
-import { safeRollback, withClient, type Db } from "./db.js";
+import { tx, type Db } from "./db.js";
+// S43 deadlock retry lives in db.ts so ai-runs/ can use it without an import cycle; re-exported for existing importers.
+export { tx } from "./db.js";
 import { MediaNodeNotFoundError, MediaNodeRegistry } from "./media-node-registry.js";
 import { MediaBridgeError } from "./media-client.js";
 import { mkdir, readFile, rename, stat, unlink } from "node:fs/promises";
@@ -251,32 +253,6 @@ async function requireTurnstile(config: Config, req: FastifyRequest, token: stri
 
 function turnstileHostname(config: Config): string | null {
   try { return new URL(config.PUBLIC_ORIGIN).hostname; } catch { return null; }
-}
-
-/**
- * A deadlock victim (40P01) and a serialization failure (40001) leave the transaction fully rolled
- * back, so re-running the closure is safe: every `tx` closure here is pure database work — the
- * doorbell is rung after the commit (S20 D4), media/push calls never run inside one, and every
- * accumulator a closure mutates is declared inside it. Retry only when the ROLLBACK itself
- * succeeded; a failed rollback marks the client broken and the state is unknown.
- */
-export async function tx<T>(db: Db, fn: (c: PoolClient) => Promise<T>, label = "tx"): Promise<T> {
-  return withClient(db, async (c) => {
-    for (let attempt = 1; ; attempt++) {
-      await c.query("BEGIN");
-      try {
-        const value = await fn(c);
-        await c.query("COMMIT");
-        return value;
-      } catch (e) {
-        const rollbackFailed = await safeRollback(c);
-        const code = (e as { code?: unknown } | null)?.code;
-        if (attempt >= 3 || rollbackFailed || (code !== "40P01" && code !== "40001")) throw e;
-        diag(db, "db.deadlock_retry", { label, code, attempt }, { level: "warn" });
-        await new Promise((resolve) => setTimeout(resolve, 10 + Math.random() * 40));
-      }
-    }
-  });
 }
 
 function requireUser(
@@ -552,12 +528,15 @@ export async function buildApp(
     if (!raw) return;
     const hash = tokenHash(raw);
     const s = await db.query(
-      `SELECT s.id session_id,s.platform,s.client_type,u.id,u.email username,u.role FROM sessions s JOIN users u ON u.id=s.user_id
+      `SELECT s.id session_id,s.platform,s.client_type,s.previous_refresh_hash IS NOT NULL refresh_unconfirmed,u.id,u.email username,u.role FROM sessions s JOIN users u ON u.id=s.user_id
       WHERE s.access_hash=$1 AND s.revoked_at IS NULL AND s.access_expires_at>now()`,
       [hash],
     );
     if (s.rowCount) {
       const r = s.rows[0];
+      // Using the rotated access token proves the client stored the new pair; end the refresh grace.
+      if (r.refresh_unconfirmed)
+        await db.query(`UPDATE sessions SET previous_refresh_hash=NULL WHERE id=$1 AND access_hash=$2`, [r.session_id, hash]);
       req.principal = {
         kind: "user",
         sessionId: r.session_id,
@@ -646,8 +625,11 @@ export async function buildApp(
     const access = opaqueToken(),
       refresh = opaqueToken();
     const q = await db.query(
-      `UPDATE sessions SET access_hash=$1,refresh_hash=$2,access_expires_at=now()+interval '15 minutes',refresh_expires_at=now()+interval '30 days'
-      WHERE refresh_hash=$3 AND revoked_at IS NULL AND refresh_expires_at>now() RETURNING access_expires_at`,
+      // S93: the replaced refresh token stays valid until the new access token is used (preHandler
+      // clears it), so an app killed between this response and its keychain write can still refresh.
+      `UPDATE sessions SET access_hash=$1,refresh_hash=$2,previous_refresh_hash=CASE WHEN refresh_hash=$3 THEN $3 ELSE previous_refresh_hash END,
+      access_expires_at=now()+interval '15 minutes',refresh_expires_at=now()+interval '30 days'
+      WHERE (refresh_hash=$3 OR previous_refresh_hash=$3) AND revoked_at IS NULL AND refresh_expires_at>now() RETURNING access_expires_at`,
       [tokenHash(access), tokenHash(refresh), tokenHash(b.refreshToken)],
     );
     if (!q.rowCount)
@@ -675,7 +657,7 @@ export async function buildApp(
     const availability=await settingsAvailability(db,config);
     const q = await db.query(
       `SELECT s.id,s.gateway_id,s.slot_index,s.label,s.phone_label,s.country_iso,s.embedded,s.version,s.device_present,s.assignment_pending,g.last_seen_at,g.control_enabled,
-      g.telephony_ready,g.sms_ready,g.media_ready,g.time_zone,g.kind gateway_kind,
+      g.telephony_ready,g.sms_ready,g.media_ready,g.time_zone,g.kind gateway_kind,g.name gateway_name,
       st.mode,st.timeout_seconds,st.version settings_version,st.applied_version FROM sims s JOIN gateways g ON g.id=s.gateway_id
       JOIN sim_settings st ON st.sim_id=s.id WHERE s.owner_user_id=$1 ORDER BY s.slot_index NULLS LAST, s.id`,
       [p.user.id],
@@ -694,6 +676,7 @@ export async function buildApp(
         mediaReady: r.media_ready,
         timeZone: r.time_zone,
         gatewayKind: r.gateway_kind,
+        gatewayName: r.gateway_name ?? null,
         version: Number(r.version),
         present: r.device_present,
         assignmentPending: r.assignment_pending,
@@ -887,7 +870,7 @@ export async function buildApp(
     const [q, counted] = await Promise.all([
       db.query(
         // One LEFT JOIN carries the occupancy lock for the whole page; never a per-row lookup.
-        `SELECT c.id,c.sim_id,c.direction,c.remote_number,c.state,c.started_at,c.answered_at,c.ended_at,c.originating_platform,c.answered_by_platform,c.answered_by_device,c.failure_reason,c.conflict_disposition,c.blocked_source,c.recording_status,c.claimed_by_session_id,c.originating_session_id,c.gateway_time_zone,c.mode_snapshot,c.ai_run_id,c.ai_trigger_at,c.internal_call,c.peer_call_id,c.peer_sim_id,${PEER_SIM_LABEL},${SIM_LABEL},run.state ai_run_state,s.country_iso sim_country_iso,gk.kind gateway_kind,lock.acquired_at lock_acquired_at,(${PENDING_CALL}) unseen
+        `SELECT c.id,c.sim_id,c.direction,c.remote_number,c.state,c.started_at,c.answered_at,c.ended_at,c.originating_platform,c.answered_by_platform,c.answered_by_device,c.failure_reason,c.conflict_disposition,c.blocked_source,c.recording_status,c.claimed_by_session_id,c.originating_session_id,c.gateway_time_zone,c.mode_snapshot,c.ai_run_id,c.ai_trigger_at,c.internal_call,c.peer_call_id,c.peer_sim_id,${PEER_SIM_LABEL},${SIM_LABEL},run.state ai_run_state,(run.failure_code IS NOT DISTINCT FROM 'owner_joined') owner_joined_local,s.country_iso sim_country_iso,gk.kind gateway_kind,lock.acquired_at lock_acquired_at,(${PENDING_CALL}) unseen
       FROM call_records c LEFT JOIN sims s ON s.id=c.sim_id LEFT JOIN gateways gk ON gk.id=s.gateway_id LEFT JOIN gateway_call_locks lock ON lock.call_id=c.id
         LEFT JOIN ai_call_runs run ON run.id=c.ai_run_id
       ${where}
@@ -919,7 +902,7 @@ export async function buildApp(
     const p = requireUser(req);
     const { id } = z.object({ id: z.uuid() }).parse(req.params);
     const q = await db.query(
-      `SELECT c.*,${PEER_SIM_LABEL},${SIM_LABEL},run.state ai_run_state,s.country_iso sim_country_iso,gk.kind gateway_kind,lock.acquired_at lock_acquired_at,(${PENDING_CALL}) unseen FROM call_records c
+      `SELECT c.*,${PEER_SIM_LABEL},${SIM_LABEL},run.state ai_run_state,(run.failure_code IS NOT DISTINCT FROM 'owner_joined') owner_joined_local,s.country_iso sim_country_iso,gk.kind gateway_kind,lock.acquired_at lock_acquired_at,(${PENDING_CALL}) unseen FROM call_records c
        LEFT JOIN sims s ON s.id=c.sim_id LEFT JOIN gateways gk ON gk.id=s.gateway_id LEFT JOIN gateway_call_locks lock ON lock.call_id=c.id
        LEFT JOIN ai_call_runs run ON run.id=c.ai_run_id
        WHERE c.id=$1 AND c.snapshot_owner_id=$2`,
@@ -1502,12 +1485,24 @@ export async function buildApp(
 
   app.get("/api/v1/sms", async (req) => {
     const p = requireUser(req);
-    const { limit } = z
-      .object({ limit: z.coerce.number().int().min(1).max(100).default(50) })
+    // S89: keyset pages. `before`/`beforeId` come together or not at all.
+    const { limit, before, beforeId } = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(500).default(50),
+        before: z.string().datetime({ offset: true }).optional(),
+        beforeId: z.uuid().optional(),
+      })
+      .refine((v) => (v.before === undefined) === (v.beforeId === undefined), "before and beforeId must be given together")
       .parse(req.query);
+    // cursor_created_at keeps Postgres microseconds; the DTO's createdAt (JS Date) is ms-only and would skip/duplicate rows.
     const q = await db.query(
-      `SELECT m.*,s.country_iso sim_country_iso FROM sms_messages m LEFT JOIN sims s ON s.id=m.sim_id WHERE m.snapshot_owner_id=$1 ORDER BY m.created_at DESC LIMIT $2`,
-      [p.user.id, limit],
+      `SELECT m.*,s.country_iso sim_country_iso,
+              to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') cursor_created_at
+         FROM sms_messages m LEFT JOIN sims s ON s.id=m.sim_id
+        WHERE m.snapshot_owner_id=$1
+          AND ($3::timestamptz IS NULL OR (m.created_at,m.id)<($3::timestamptz,$4::uuid))
+        ORDER BY m.created_at DESC,m.id DESC LIMIT $2`,
+      [p.user.id, limit, before ?? null, beforeId ?? null],
     );
     // S21 §F: threads from a blocked number stay visible and carry the block flag. Newly blocked
     // messages never reach `sms_messages` at all, so nothing needs hiding here.
@@ -1518,7 +1513,11 @@ export async function buildApp(
       rows.map((row) => ({ remoteNumber: row.remote_number, countryIso: row.sim_country_iso })),
       "sms",
     );
-    return { items: rows.map((row, index) => smsDto(row, annotations[index])) };
+    const tail = rows.length === limit ? rows[rows.length - 1] : null;
+    return {
+      items: rows.map((row, index) => smsDto(row, annotations[index])),
+      nextCursor: tail ? { before: tail.cursor_created_at, beforeId: tail.id } : null,
+    };
   });
   app.post("/api/v1/sms/batch", async (req,reply) => {
     const p=requireUser(req);mutationOrigin(req,config);const key=idemKey(req);
@@ -2156,6 +2155,8 @@ function callDto(r: any, annotation: NumberAnnotation = EMPTY_NUMBER_ANNOTATION)
     peerCallId: r.peer_call_id ?? null,
     peerSimId: r.peer_sim_id ?? null,
     peerSimLabel: r.peer_sim_label ?? null,
+    // S94b: the owner picked up on the Pixel mid-AI-run; rows read without the run join are false.
+    ownerJoinedLocal: r.owner_joined_local === true,
     // S81: this call's own SIM label, only when known (rows read without the column omit it).
     ...(r.sim_label ? { simLabel: r.sim_label } : {}),
   };
@@ -2324,7 +2325,7 @@ export async function pretranscodePixelRecording(
   let track = "";
   try {
     const manifest = await reader.manifest(callId);
-    for (const item of manifest?.tracks ?? []) {
+    for (const item of [...manifest?.tracks ?? [], ...manifest?.uplinkTracks ?? []]) {
       track = item.track;
       await cachedMp3(cacheDir, `${callId}-pixel-${item.track}`, (target) =>
         transcode(db, cacheDir, target, () => reader.openTrack(callId, item.track)));
@@ -2407,7 +2408,7 @@ function registerRecordingRoutes(
 
   app.get("/api/v1/calls/:id/recordings/:track", async (req, reply) => {
     const { id, track } = z
-      .object({ id: z.uuid(), track: z.enum([...recordingTracks, "caller_playout", "conversation"]) })
+      .object({ id: z.uuid(), track: z.enum([...recordingTracks, "caller_playout", "caller_uplink", "conversation"]) })
       .parse(req.params);
     const {source,disposition,format}=z.object({
       source:z.enum(['media_node','pixel']).default('media_node'),
@@ -2415,7 +2416,7 @@ function registerRecordingRoutes(
       format:z.enum(['mp3']).optional(),
     }).parse(req.query);
     const call=await authorize(req, id);
-    if (source !== "pixel" && track === "caller_playout") fail(404, "NOT_FOUND", "Recording track not found");
+    if (source !== "pixel" && (track === "caller_playout" || track === "caller_uplink")) fail(404, "NOT_FOUND", "Recording track not found");
     // S36 C4: `conversation` is a virtual track — it exists only as the mixed mp3 export.
     if (track === "conversation" && format !== "mp3") fail(400, "INVALID_RECORDING_PATH", "Recording path is invalid");
     const attachment = disposition === "attachment";
@@ -2437,7 +2438,11 @@ function registerRecordingRoutes(
         mp3 = await cachedMp3(cacheDir, `${id}-${source}-${track}`, async (target) => {
           if (track !== "conversation") return transcodeMp3(db, cacheDir, target, () => selected.openTrack(id, track as RecordingTrack));
           const offset = await conversationOffsetMs(selected, id);
-          return mixMp3(db, cacheDir, target, (part) => selected.openTrack(id, part), offset);
+          // S94: with the owner-side uplink capture the caller half of the mix is that track, so an
+          // owner who picked up on the phone is in the export; the duration probe still aligns it.
+          const uplink = selected instanceof PixelRecordingArchiveReader && (await selected.manifest(id))?.uplinkTracks?.length ? selected : null;
+          return mixMp3(db, cacheDir, target, (part) => uplink
+            ? uplink.openTrack(id, part === "caller_original" ? "caller_uplink" : part) : selected.openTrack(id, part), offset);
         });
       } else opened = await selected.openTrack(
         id,
@@ -5416,6 +5421,75 @@ function registerGatewayRoutes(
     if ((b.state === "ended" || b.state === "failed") && !value.replayed)
       await requestMediaClose(db, media, callId);
     return value;
+  });
+  // S94 b: the owner picked up the AI-answered call on the phone itself (unmuted while the gateway held
+  // the mute lease). The AI run ends as `owner_joined`; the call stays `active` with no hangup, and the
+  // closed run is outside every reconciler/cleanup branch. Not `/events`: that route's state enum is Telecom's.
+  app.post("/api/v1/gateway/calls/:callId/owner-joined", async (req) => {
+    const p = requireDevice(req);
+    const { callId } = z.object({ callId: z.uuid() }).parse(req.params);
+    const b = z
+      .object({
+        eventId: z.uuid(),
+        generation: z.number().int().positive(),
+        deviceCallId: z.string().min(1).max(200),
+        telecomCreationTimeMillis: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+      })
+      .parse(req.body);
+    const fingerprint = requestFingerprint({ callId, ...b });
+    const value = await tx(db, async (c) => {
+      const g = await c.query(`SELECT device_epoch FROM gateways WHERE id=$1 FOR UPDATE`, [p.gatewayId]);
+      if (Number(g.rows[0].device_epoch) !== b.generation)
+        fail(409, "FENCE_REJECTED", "Device epoch is stale");
+      const prior = await c.query(
+        `SELECT event_type,resource_id,payload FROM device_events WHERE gateway_id=$1 AND event_id=$2`,
+        [p.gatewayId, b.eventId],
+      );
+      if (prior.rowCount) {
+        const saved = prior.rows[0];
+        if (saved.event_type !== "call.owner_joined" || saved.resource_id !== callId ||
+            saved.payload?.requestFingerprint !== fingerprint)
+          fail(409, "EVENT_ID_REUSED", "Event ID was reused with different parameters");
+        return { response: saved.payload.response as { accepted: true; alreadyEnded: boolean }, ended: false };
+      }
+      const q = await c.query(
+        `SELECT c.state,c.device_call_id,c.answered_by_platform,c.ai_run_id,b.telecom_creation_time_millis
+         FROM call_records c LEFT JOIN recording_capture_bindings b ON b.call_id=c.id
+         WHERE c.id=$1 AND c.gateway_id=$2 FOR UPDATE OF c`,
+        [callId, p.gatewayId],
+      );
+      if (!q.rowCount) fail(404, "NOT_FOUND", "Call not found");
+      const call = q.rows[0];
+      // call_records has no Telecom creation time; the capture binding is its only durable copy.
+      if (call.device_call_id !== b.deviceCallId ||
+          (call.telecom_creation_time_millis !== null && Number(call.telecom_creation_time_millis) !== b.telecomCreationTimeMillis))
+        fail(409, "DEVICE_CALL_MISMATCH", "Device call identity does not match the server record");
+      // Transient states are retryable: nothing is stored, so the same eventId re-evaluates later.
+      // Every 409 is terminal for the gateway, and a dropped join would leave the AI run to hang up the call.
+      if (call.state === "connecting" || call.state === "unknown")
+        fail(503, "CALL_STATE_PENDING", "Call state is not settled yet");
+      if (call.state !== "active") fail(409, "CALL_NOT_ACTIVE", "Call is not active");
+      if (call.answered_by_platform !== "ai" || !call.ai_run_id)
+        fail(409, "CALL_NOT_AI_ANSWERED", "Call was not answered by AI");
+      const ended = await c.query(
+        `UPDATE ai_call_runs SET state='ended',failure_code='owner_joined',ended_at=COALESCE(ended_at,now()),
+           cleanup_required=false,lease_until=NULL,updated_at=now()
+         WHERE call_id=$1 AND state IN ('answer_committed','awaiting_active','active','reconcile_unknown') RETURNING id`,
+        [callId],
+      );
+      const response = { accepted: true as const, alreadyEnded: !ended.rowCount };
+      await c.query(
+        `INSERT INTO device_events(gateway_id,event_id,event_type,resource_id,payload)VALUES($1,$2,'call.owner_joined',$3,$4)`,
+        [p.gatewayId, b.eventId, callId, JSON.stringify({ requestFingerprint: fingerprint, response })],
+      );
+      return { response, ended: Boolean(ended.rowCount), runId: ended.rows[0]?.id as string | undefined };
+    }, "ai.owner_joined");
+    if (value.ended) {
+      diag(db, "call.owner_joined_local", { runId: value.runId }, { callId });
+      // The gateway no longer needs the room; closing it now makes the bridge and Voice leave at once.
+      await requestMediaClose(db, media, callId);
+    }
+    return value.response;
   });
   app.post("/api/v1/gateway/sms/:smsId/events", async (req) => {
     const p = requireDevice(req);

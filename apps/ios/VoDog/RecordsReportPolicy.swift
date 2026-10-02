@@ -178,6 +178,13 @@ enum RecordSearchPolicy {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// 「已加载：…」 only when it tells the user something the screen does not: an active search, a page after the
+    /// first, or a cached snapshot kept on screen while offline or after a failed refresh (S46). Web and Android
+    /// show no caption on the default first page.
+    static func showsSnapshotCaption(query: String, page: Int, stale: Bool) -> Bool {
+        stale || page > 1 || !trimmed(query).isEmpty
+    }
+
     /// S26: `page` is what switches the route into its paged form, so `limit` is dropped whenever one is sent —
     /// the two would otherwise state two different window sizes for the same request. Without a `page` the
     /// query is the S22 one plus `includeBlocked`, which is what a Control that predates paging still answers.

@@ -143,7 +143,9 @@ struct InterceptionsView: View {
                     Text("类型仅筛选本页已加载的记录，不改变全部号码范围。")
                 }
                 Section {
-                    if let snapshotCaption {
+                    if let snapshotCaption, RecordSearchPolicy.showsSnapshotCaption(
+                        query: "", page: store.page, stale: error != nil || !availability.canMutate
+                    ) {
                         Text(snapshotCaption).font(.caption).foregroundStyle(.secondary)
                         if error != nil || !availability.canMutate {
                             Text("当前显示缓存内容；请求：第 \(store.page) 页 · 每页 \(store.pageSize) 条")

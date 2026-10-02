@@ -12,6 +12,8 @@ internal class PassiveCaptureDiagnostics(
     private val record: AudioRecord?,
     private val track: String,
     private val callId: String,
+    // S94: the bridged-session uplink capture reports as `media.uplink_capture.*`.
+    private val diagPrefix: String = "passive_recording",
 ) : AutoCloseable {
     val stats = PassiveCaptureStats() // Owned by the capture thread, never by the callback.
     private val sessionId = record?.audioSessionId
@@ -65,7 +67,7 @@ internal class PassiveCaptureDiagnostics(
         health.observe(silenced)
         if (!changed) return
         configurationSeen = true
-        GatewayDiag.log("passive_recording.config", mapOf(
+        GatewayDiag.log("$diagPrefix.config", mapOf(
             "track" to track, "sessionId" to sessionId, "via" to via,
             "configurationKnown" to (config != null), "silenced" to silenced,
             "source" to config?.clientAudioSource,
@@ -79,7 +81,7 @@ internal class PassiveCaptureDiagnostics(
         if (closed) return
         configurationErrors++
         if (phase == "poll" || phase == "callback") health.observe(null)
-        if (configurationErrors == 1L) GatewayDiag.log("passive_recording.diagnostic_failed",
+        if (configurationErrors == 1L) GatewayDiag.log("$diagPrefix.diagnostic_failed",
             mapOf("track" to track, "phase" to phase, "sessionId" to sessionId),
             callId = callId, level = "warn")
     }
@@ -87,7 +89,7 @@ internal class PassiveCaptureDiagnostics(
     @Synchronized
     fun report(final: Boolean, terminalState: String) {
         runCatching {
-            GatewayDiag.log("passive_recording.stats", stats.fields() + mapOf(
+            GatewayDiag.log("$diagPrefix.stats", stats.fields() + mapOf(
                 "track" to track, "sessionId" to sessionId, "final" to final,
                 "terminalState" to terminalState, "available" to (record != null),
                 "recordingStarted" to recordingStarted,

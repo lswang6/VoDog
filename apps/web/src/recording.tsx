@@ -1,23 +1,23 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {useReportedError} from './ui-error';
-import {parseRecording,recordingAttachmentFilename,recordingUrl,verifyPixelTrackHeaders,type DerivedTrackDescriptor,type RecordingDescriptor,type RecordingSource,type RecordingTrack,type TrackDescriptor} from './recording-contract';
+import {serverRecordingLabel,parseRecording,recordingAttachmentFilename,recordingUrl,verifyPixelTrackHeaders,type DerivedTrackDescriptor,type UplinkTrackDescriptor,type RecordingDescriptor,type RecordingSource,type RecordingTrack,type TrackDescriptor} from './recording-contract';
 import {audioOwnership} from './audio-ownership';
 import {expireBrowserSession,browserSessionGeneration} from './session-boundary';
 import {recordingErrorCode,recordingRequest} from './recording-request';
-import {pairContractDurationSeconds,RecordingPairController,recordingPairIdentity,type PairState,type PairTrackDescriptor} from './recording-pair';
+import {pairContractDurationSeconds,playbackPairs,RecordingPairController,recordingPairIdentity,type PairState,type PairTrackDescriptor} from './recording-pair';
 import {formatGatewayDateTime,gatewayDisplayTimeZone} from './gateway-time';
 import {CallDetailGuard} from './call-detail-guard';
 import type {ApiRequest} from './contacts';
 import {gatewayArchiveLabel,gatewayKindLabel} from './gateway-kind';
 
-const labels={remote_original:'对方原声',caller_original:'我的原声',caller_playout:'通话播放声（含补偿）'};
+const labels={remote_original:'对方原声',caller_original:'我的原声',caller_playout:'通话播放声（含补偿）',caller_uplink:'本机上行（含本机接入）'};
 const pixelDisabled='设备原始归档尚未启用；当前可播放服务器录音。';
 const DOWNLOAD_TIMEOUT_MS=900_000;
 const recordingPlayers=new Set<()=>void>();
 function registerRecordingPlayer(pause:()=>void,dispose:()=>void){recordingPlayers.add(pause);const unregister=audioOwnership.registerPlayer(dispose);return()=>{recordingPlayers.delete(pause);unregister();};}
 function claimRecordingPlayer(owner:()=>void){for(const stop of [...recordingPlayers])if(stop!==owner)stop();}
 /** `preferPixelSource`：S38 手机直拨的通话没有 media_node 那一路，录音只在 Pixel 归档里，默认就打开它。 */
-export function CallRecording({callId,timeZone,request,preferPixelSource=false,gatewayKind}:{callId:string;timeZone?:string;request?:ApiRequest;preferPixelSource?:boolean;gatewayKind?:string|null}){
+export function CallRecording({callId,timeZone,request,preferPixelSource=false,ownerJoinedLocal=false,gatewayKind}:{callId:string;timeZone?:string;request?:ApiRequest;preferPixelSource?:boolean;ownerJoinedLocal?:boolean;gatewayKind?:string|null}){
  const [opened,setOpened]=useState(false),[source,setSource]=useState<RecordingSource>(preferPixelSource?'pixel':'media_node');
  const [missingNotice,setMissingNotice]=useState('');
  const callActive=useSyncExternalStore(audioOwnership.subscribe,audioOwnership.isCallActive);
@@ -29,7 +29,7 @@ export function CallRecording({callId,timeZone,request,preferPixelSource=false,g
   {missingNotice&&<p className="note" role="status">{missingNotice}</p>}
   {opened&&request&&<CallDetailGuard callId={callId} request={request} onMissing={message=>{audioOwnership.stopRecordings();setOpened(false);setMissingNotice(message);}}/>}
   {opened&&<><div className="recording-sources" role="group" aria-label="录音副本">
-   {(['media_node','pixel'] as const).map(value=><button key={value} className={source===value?'primary':'passkey'} aria-pressed={source===value} onClick={()=>setSource(value)}>{value==='pixel'?gatewayArchiveLabel(gatewayKind):'服务器录音'}</button>)}
+   {(['media_node','pixel'] as const).map(value=><button key={value} className={source===value?'primary':'passkey'} aria-pressed={source===value} onClick={()=>setSource(value)}>{value==='pixel'?gatewayArchiveLabel(gatewayKind):serverRecordingLabel(ownerJoinedLocal)}</button>)}
   </div><RecordingDetail key={`${callId}:${source}`} callId={callId} source={source} timeZone={zone} gatewayKind={gatewayKind}/></>}
  </div>;
 }
@@ -54,12 +54,10 @@ function RecordingDetail({callId,source,timeZone,gatewayKind}:{callId:string;sou
  if(error===pixelDisabled)return <p className="note" role="status">{error}</p>;
  if(error)return <div><p className="error" role="alert">{error}</p><button className="passkey" onClick={()=>setAttempt(value=>value+1)}>重试</button></div>;
  if(!recording)return <p className="note">{source==='pixel'?`${gatewayKindLabel(gatewayKind).short} 原始录音尚未归档，或仍在上传。`:'录音尚未生成或仍在保存。'}</p>;
- const remote=recording.tracks.find(track=>track.id==='remote_original'),caller=recording.tracks.find(track=>track.id==='caller_original'),playout=recording.derivedTracks.find(track=>track.id==='caller_playout');
  return <div><p className="note">{recording.archiveComplete?'声轨已保存':'保存未完成，以下声轨可供查看'} · {formatGatewayDateTime(recording.finalizedAt,timeZone)}</p>
  {recording.captureComplete===false&&<p className="note">录制过程中有缺失，回放可能出现缺音。</p>}
-  {remote&&caller&&remote.bytes>(source==='pixel'?44:0)&&caller.bytes>(source==='pixel'?44:0)&&<CombinedRecordingAudio callId={callId} source={source} tracks={[remote,caller]} label="双向原声一起播放" description="同时播放双方原声，可能存在时间偏差。需要核对细节时，可展开原始分轨。"/>}
-  {source==='pixel'&&remote&&playout&&remote.bytes>44&&playout.bytes>44&&<CombinedRecordingAudio callId={callId} source={source} tracks={[remote,playout]} label="补偿后双向播放" description="同时播放对方原声与独立补偿播放轨；PLC/FEC 声音不会改变原声完整性。"/>}
-  <details className="original-tracks"><summary>分别播放原声</summary>{recording.tracks.filter(track=>track.bytes>(source==='pixel'?44:0)).map(track=><RecordingAudio key={`${track.id}:${track.sha256}`} callId={callId} source={source} track={track}/>)}</details>
+  {playbackPairs(recording,source).map(pair=><CombinedRecordingAudio key={pair.label} callId={callId} source={source} tracks={pair.tracks} label={pair.label} description={pair.description}/>)}
+  <details className="original-tracks"><summary>分别播放原声</summary>{[...recording.tracks,...recording.uplinkTracks].filter(track=>track.bytes>(source==='pixel'?44:0)).map(track=><RecordingAudio key={`${track.id}:${track.sha256}`} callId={callId} source={source} track={track}/>)}</details>
   {recording.derivedTracks.length>0&&<details className="derived-tracks"><summary>播放通话声音（含补偿）</summary><p className="note">这是独立的播放轨，可能含 PLC/FEC 补偿；它不会覆盖原声缺口或改变原声完整性。</p>{recording.derivedTracks.filter(track=>track.bytes>44).map(track=><RecordingAudio key={`${track.id}:${track.sha256}`} callId={callId} source={source} track={track}/>)}</details>}
  </div>;
 }
@@ -104,7 +102,7 @@ function RecordingPairAudio({callId,source,tracks,label,description}:{callId:str
  </div>;
 }
 function formatTime(seconds:number){if(!Number.isFinite(seconds)||seconds<0)return '0:00';const whole=Math.floor(seconds);return `${Math.floor(whole/60)}:${String(whole%60).padStart(2,'0')}`;}
-function RecordingAudio({callId,source,track}:{callId:string;source:RecordingSource;track:TrackDescriptor|DerivedTrackDescriptor}){
+function RecordingAudio({callId,source,track}:{callId:string;source:RecordingSource;track:TrackDescriptor|DerivedTrackDescriptor|UplinkTrackDescriptor}){
  const name=labels[track.id];
  const ref=useRef<HTMLAudioElement>(null),pauseRef=useRef<()=>void>(()=>{}),disposeRef=useRef<()=>void>(()=>{}),[ready,setReady]=useState(source==='media_node'),[error,setError]=useState('');
  const url=recordingUrl(callId,source,track.id);
@@ -123,7 +121,7 @@ function RecordingAudio({callId,source,track}:{callId:string;source:RecordingSou
  },[url,source,track]);
  useEffect(()=>{const audio=ref.current;return()=>{if(audio){audio.pause();audio.removeAttribute('src');audio.load();}};},[]);
  return <div className="recording-track"><div className="recording-track-heading"><strong>{name}</strong>{knownDuration!==undefined&&<span className="note recording-duration">{formatTime(knownDuration)}</span>}<RecordingDownloadButton callId={callId} source={source} track={track.id} label="下载"/></div>
-  {track.sourceRole==='original_capture'&&track.captureComplete===false&&<p className="note">此声轨录制不完整 · 缺口 {track.gapCount} · 丢帧 {track.droppedFrames}</p>}
+  {track.sourceRole!=='derived_playout'&&track.captureComplete===false&&<p className="note">此声轨录制不完整 · 缺口 {track.gapCount} · 丢帧 {track.droppedFrames}</p>}
   {track.sourceRole==='derived_playout'&&<p className="note">派生播放轨 · 补偿帧 {track.recoveryFrames} · 缺口 {track.gapCount}{track.playoutComplete?'':' · 播放轨不完整'}</p>}
   {!ready&&!error&&<p role="status">正在校验声轨…</p>}
   <audio ref={ref} hidden={!ready||Boolean(error)} controls preload="metadata" aria-label={name} src={ready&&!error?url:undefined} onPlay={()=>{if(audioOwnership.isCallActive())disposeRef.current();else claimRecordingPlayer(pauseRef.current);}} onError={()=>setError('音频暂时无法播放，请重新打开录音或重新登录。')}/>

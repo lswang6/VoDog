@@ -45,5 +45,6 @@ test('ignores empty segments and tolerates a missing segment list', () => {
 test('labels known and unknown tracks', () => {
  assert.equal(transcriptTrackLabel('remote_original'),'对方原声');
  assert.equal(transcriptTrackLabel('caller_original'),'我的原声');
+ assert.equal(transcriptTrackLabel('caller_uplink'),'本机上行（含本机接入）');
  assert.equal(transcriptTrackLabel('weird'),'其他声轨');
 });

@@ -45,3 +45,18 @@ test("v2 descriptor remains valid without a derived track", () => {
   assert.equal(parsed.version, 2);
   assert.equal(parsed.derivedTracks, undefined);
 });
+
+test("S94 descriptor accepts archiveVersion 4 with exactly one uplink and only both together", () => {
+  const { derivedTracks: _derivedTracks, ...v2 } = base;
+  const uplinkTracks = [{ track: "caller_uplink" as const, sourceRole: "uplink_capture" as const, mediaType: "audio/wav" as const,
+    bytes: 684, sha256: "f".repeat(64), captureComplete: false, gapCount: 2, droppedFrames: 0 }];
+  const parsed = parsePixelRecordingDescriptor({ ...v2, version: 2, archiveVersion: 4, uplinkTracks });
+  assert.equal(parsed.archiveVersion, 4);
+  assert.equal(parsed.uplinkTracks?.[0].track, "caller_uplink");
+  assert.equal(parsePixelRecordingDescriptor({ ...base, archiveVersion: 4, uplinkTracks }).version, 3);
+  assert.throws(() => parsePixelRecordingDescriptor({ ...base, archiveVersion: 4 }));
+  assert.throws(() => parsePixelRecordingDescriptor({ ...base, uplinkTracks }));
+  assert.throws(() => parsePixelRecordingDescriptor({ ...base, archiveVersion: 4, uplinkTracks: [...uplinkTracks, ...uplinkTracks] }));
+  assert.throws(() => parsePixelRecordingDescriptor({ ...base, version: 4, archiveVersion: 4, uplinkTracks }));
+  assert.throws(() => parsePixelRecordingDescriptor({ ...base, archiveVersion: 4, uplinkTracks: [{ ...uplinkTracks[0], track: "caller_original" }] }));
+});

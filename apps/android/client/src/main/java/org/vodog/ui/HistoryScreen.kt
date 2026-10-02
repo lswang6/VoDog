@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -46,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -71,6 +73,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,6 +82,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleStartEffect
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 
 /**
@@ -172,6 +176,9 @@ internal fun HistoryPage(state: ClientUiState, model: ClientViewModel, onDetailV
         } else {
             ClientSimPicker(sims, selectedId, enabled = state.networkAvailable, badges = state.badges?.simTotal().orEmpty()) { selectedId = it }
         }
+        // S92: at large font scales 拦截记录 wrapped to two lines. There the checkmark goes, the padding
+        // shrinks and the label stays on one line, shrinking to fit; default scales are unchanged.
+        val largeFont = isLargeFontScale(LocalDensity.current.fontScale)
         SingleChoiceSegmentedButtonRow(
             Modifier.fillMaxWidth().padding(horizontal = ScreenPadding, vertical = 6.dp).heightIn(min = TouchTarget),
         ) {
@@ -181,7 +188,20 @@ internal fun HistoryPage(state: ClientUiState, model: ClientViewModel, onDetailV
                     onClick = { view = entry },
                     shape = SegmentedButtonDefaults.itemShape(index, HistoryView.entries.size),
                     modifier = Modifier.heightIn(min = TouchTarget).testTag("history.view.${entry.name.lowercase()}"),
-                ) { Text(entry.label) }
+                    icon = if (largeFont) ({}) else ({ SegmentedButtonDefaults.Icon(view == entry) }),
+                    contentPadding = if (largeFont) PaddingValues(horizontal = 4.dp) else SegmentedButtonDefaults.ContentPadding,
+                ) {
+                    if (largeFont) {
+                        Text(
+                            entry.label,
+                            maxLines = 1,
+                            softWrap = false,
+                            autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = LocalTextStyle.current.fontSize),
+                        )
+                    } else {
+                        Text(entry.label)
+                    }
+                }
             }
         }
         when (view) {
@@ -898,6 +918,7 @@ internal fun RecordingSheet(detail: CallDetailUiState, model: ClientViewModel, o
                 callId = detail.item.callId,
                 recordingStatus = detail.item.recordingStatus,
                 gatewayKind = detail.item.gatewayKind,
+                ownerJoinedLocal = detail.item.ownerJoinedLocal,
                 recordings = detail.recordings,
                 selectedSource = detail.selectedRecordingSource,
                 onSelectSource = { source ->
@@ -958,7 +979,7 @@ private fun TranscriptResultContent(result: TranscriptResult?) {
         Text(result.text.ifBlank { "转写结果为空" })
     } else {
         val blocks = mergeTranscriptSegments(result.segments)
-        OriginalTranscriptTrack.entries.forEach { track ->
+        TranscriptTrack.entries.forEach { track ->
             val trackBlocks = blocks.filter { it.track == track }
             if (trackBlocks.isEmpty()) return@forEach
             Text(track.label, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -989,6 +1010,7 @@ private fun RecordingSection(
     callId: String,
     recordingStatus: String,
     gatewayKind: GatewayKind,
+    ownerJoinedLocal: Boolean,
     recordings: Map<RecordingSource, RemoteResource<RecordingManifest?>>,
     selectedSource: RecordingSource,
     onSelectSource: (RecordingSource) -> Unit,
@@ -1016,13 +1038,13 @@ private fun RecordingSection(
                 enabled = LocalNetworkAvailable.current || recordings[source] is RemoteResource.Loaded,
                 shape = SegmentedButtonDefaults.itemShape(index, RecordingSource.entries.size),
                 modifier = Modifier.heightIn(min = TouchTarget),
-            ) { Text(source.label(gatewayKind)) }
+            ) { Text(source.label(gatewayKind, ownerJoinedLocal)) }
         }
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         RecordingSource.entries.forEach { source ->
             Text(
-                "${source.label(gatewayKind)}：${recordingSourceStatusLabel(recordings[source])}",
+                "${source.label(gatewayKind, ownerJoinedLocal)}：${recordingSourceStatusLabel(recordings[source])}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1086,6 +1108,25 @@ private fun RecordingSection(
                         color = warningColor(),
                     )
                 }
+                // S36 C4: 服务器混音只有一份（按 callId+source），所以整页只保留这一个「下载对话 MP3」，挂在默认那一对上。
+                // S94: 有本机上行轨时默认一对是「通话双方（含本机接入）」，Control 的 conversation 混音也用这一对。
+                val defaultPair = recording.defaultPairMode
+                val downloadConversation = {
+                    save(RecordingAudioTrack.CONVERSATION.wireValue, listOf(RecordingAudioTrack.CONVERSATION))
+                }
+                if (defaultPair == RecordingPairMode.OWNER_JOINED) {
+                    RecordingPairControl(
+                        callId = callId,
+                        recording = recording,
+                        mode = RecordingPairMode.OWNER_JOINED,
+                        title = "通话双方（含本机接入）",
+                        detail = "对方原声 + 本机上行（含本机接入）",
+                        playbackState = playbackState,
+                        playback = playback,
+                        downloading = downloadingKey == RecordingAudioTrack.CONVERSATION.wireValue,
+                        onDownload = downloadConversation,
+                    )
+                }
                 RecordingPairControl(
                     callId = callId,
                     recording = recording,
@@ -1094,11 +1135,9 @@ private fun RecordingSection(
                     detail = "对方原声 + 我的原声；原始缺口会保留。",
                     playbackState = playbackState,
                     playback = playback,
-                    downloading = downloadingKey == RecordingAudioTrack.CONVERSATION.wireValue,
-                    // S36 C4: 服务器混音只有一份（按 callId+source），所以整页只保留这一个「下载对话 MP3」。
-                    onDownload = {
-                        save(RecordingAudioTrack.CONVERSATION.wireValue, listOf(RecordingAudioTrack.CONVERSATION))
-                    },
+                    downloading = defaultPair == RecordingPairMode.ORIGINALS &&
+                        downloadingKey == RecordingAudioTrack.CONVERSATION.wireValue,
+                    onDownload = downloadConversation.takeIf { defaultPair == RecordingPairMode.ORIGINALS },
                 )
                 val derived = recording.artifact(RecordingAudioTrack.CALLER_PLAYOUT)
                 if (derived != null) {
@@ -1131,9 +1170,11 @@ private fun RecordingSection(
                     RecordingAudioTrack.REMOTE_ORIGINAL,
                     RecordingAudioTrack.CALLER_ORIGINAL,
                     RecordingAudioTrack.CALLER_PLAYOUT,
+                    RecordingAudioTrack.CALLER_UPLINK,
                 ).forEach { playbackTrack ->
                     val artifact = recording.artifact(playbackTrack) ?: return@forEach
-                    if (playbackTrack == RecordingAudioTrack.CALLER_PLAYOUT && recording.source != RecordingSource.PIXEL) return@forEach
+                    if ((playbackTrack == RecordingAudioTrack.CALLER_PLAYOUT || playbackTrack == RecordingAudioTrack.CALLER_UPLINK) &&
+                        recording.source != RecordingSource.PIXEL) return@forEach
                     RecordingTrackControl(
                         callId = callId,
                         recording = recording,

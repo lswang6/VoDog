@@ -565,7 +565,7 @@ test('S27: the greeting reaches the transcript once, as the assistant final of i
   socket.emit('message', Buffer.from('{"type":"response.output_audio.done","question_id":"q1","response_id":""}'));
   // A later chat turn is not the greeting even though nothing else changed.
   socket.emit('message', Buffer.from('{"type":"response.output_audio.started","question_id":"q2","response_id":"resp_2","tts_type":"default"}'));
-  assert.deepEqual(transcripts, [{ text: '您好！我是 VoDog AI 助理，代用户接听电话。', final: true, responseId: 'q1' }]);
+  assert.deepEqual(transcripts, [{ text: '您好！我是 VoDog AI 助理，代用户接听电话。', final: true, responseId: 'q1', immediate: true }]);
   agent.stop();
 });
 

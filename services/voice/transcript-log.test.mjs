@@ -113,6 +113,19 @@ test('S23: a held caller sentence is posted before the AI reply it triggered', a
   await collector.close();
 });
 
+test('S90: an immediate AI final (Doubao greeting) is posted first even if its completed never matches', async () => {
+  const { agent, collector, posts, clock } = setup();
+  agent.emit('transcript', { text: '您好，我是助理', final: true, responseId: 'K1', immediate: true });
+  clock.ms += 15_000;
+  agent.emit('transcript', { text: '我找王先生', final: true, speaker: 'caller' });
+  agent.emit('transcript', { text: '好的，请稍等', final: true, responseId: 'K2' });
+  agent.emit('completed', { responseId: 'K2' });
+  agent.emit('completed', { responseId: 'other' });
+  await collector.close();
+  assert.deepEqual(posts.flat().map(item => [item.role, item.sequence, item.text]),
+    [['ai', 0, '您好，我是助理'], ['caller', 1, '我找王先生'], ['ai', 2, '好的，请稍等']]);
+});
+
 test('S27: caller revisions 2.4 s apart are one utterance, not one row each', async () => {
   const { agent, collector, posts, clock, flush } = setup();
   // Production shape from run 0407de3e (rows 2–4 at 43:29.7 / 43:31.8 / 43:34.3): a caller reading a

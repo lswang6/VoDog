@@ -174,7 +174,7 @@ struct ContactDetailView: View {
             if !contact.phones.isEmpty {
                 Section("电话") {
                     ForEach(contact.phones) { phone in
-                        LabeledContent(phone.label ?? "电话") {
+                        LabeledContent(ContactLabelDisplay.text(phone.label, fallback: "电话")) {
                             Text(phone.displayNumber).monospacedDigit().textSelection(.enabled)
                         }
                     }
@@ -183,7 +183,7 @@ struct ContactDetailView: View {
             if !contact.emails.isEmpty {
                 Section("邮箱") {
                     ForEach(contact.emails) { email in
-                        LabeledContent(email.label ?? "邮箱") { Text(email.address).textSelection(.enabled) }
+                        LabeledContent(ContactLabelDisplay.text(email.label, fallback: "邮箱")) { Text(email.address).textSelection(.enabled) }
                     }
                 }
             }
@@ -191,7 +191,7 @@ struct ContactDetailView: View {
                 Section("地址") {
                     ForEach(contact.addresses) { address in
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(address.label ?? "地址").font(.caption).foregroundStyle(.secondary)
+                            Text(ContactLabelDisplay.text(address.label, fallback: "地址")).font(.caption).foregroundStyle(.secondary)
                             Text(address.displayText).textSelection(.enabled)
                         }
                     }
@@ -442,7 +442,7 @@ struct ContactEditView: View {
             _familyName = State(initialValue: "")
             _organization = State(initialValue: "")
             _notes = State(initialValue: "")
-            _phones = State(initialValue: [EditablePhone(label: "mobile", rawNumber: prefillNumber ?? "")])
+            _phones = State(initialValue: [EditablePhone(label: ContactLabelDisplay.text("mobile", fallback: ""), rawNumber: prefillNumber ?? "")])
             _emails = State(initialValue: [])
             _addresses = State(initialValue: [])
         case let .edit(contact):
@@ -453,10 +453,10 @@ struct ContactEditView: View {
             _organization = State(initialValue: contact.organization ?? "")
             _notes = State(initialValue: contact.notes ?? "")
             _phones = State(initialValue: contact.phones.map {
-                EditablePhone(label: $0.label ?? "", rawNumber: $0.rawNumber)
+                EditablePhone(label: ContactLabelDisplay.text($0.label, fallback: ""), rawNumber: $0.rawNumber)
             })
             _emails = State(initialValue: contact.emails.map {
-                EditableEmail(label: $0.label ?? "", address: $0.address)
+                EditableEmail(label: ContactLabelDisplay.text($0.label, fallback: ""), address: $0.address)
             })
             _addresses = State(initialValue: contact.addresses.map { address in
                 let original = ContactAddressBody(
@@ -465,7 +465,7 @@ struct ContactEditView: View {
                     country: address.country
                 )
                 return EditableAddress(
-                    label: address.label ?? "", text: address.displayText,
+                    label: ContactLabelDisplay.text(address.label, fallback: ""), text: address.displayText,
                     original: original, originalText: address.displayText
                 )
             })
@@ -484,17 +484,17 @@ struct ContactEditView: View {
             notes: ContactImportMapping.trimmed(notes),
             phones: phones.compactMap { phone in
                 guard let number = ContactImportMapping.normalizedRawNumber(phone.rawNumber) else { return nil }
-                return ContactPhoneBody(rawNumber: number, label: ContactImportMapping.trimmed(phone.label))
+                return ContactPhoneBody(rawNumber: number, label: ContactLabelDisplay.stored(phone.label))
             },
             emails: emails.compactMap { email in
                 guard let address = ContactImportMapping.normalizedEmail(email.address) else { return nil }
-                return ContactEmailBody(address: address, label: ContactImportMapping.trimmed(email.label))
+                return ContactEmailBody(address: address, label: ContactLabelDisplay.stored(email.label))
             },
             addresses: addresses.compactMap { entry in
                 guard let text = ContactImportMapping.trimmed(entry.text) else { return nil }
                 if text == entry.originalText, let original = entry.original { return original }
                 return ContactAddressBody(
-                    formatted: text, label: ContactImportMapping.trimmed(entry.label),
+                    formatted: text, label: ContactLabelDisplay.stored(entry.label),
                     street: nil, city: nil, region: nil, postalCode: nil, country: nil
                 )
             }
@@ -674,8 +674,8 @@ struct ContactEditView: View {
         familyName = contact.familyName ?? ""
         organization = contact.organization ?? ""
         notes = contact.notes ?? ""
-        phones = contact.phones.map { EditablePhone(label: $0.label ?? "", rawNumber: $0.rawNumber) }
-        emails = contact.emails.map { EditableEmail(label: $0.label ?? "", address: $0.address) }
+        phones = contact.phones.map { EditablePhone(label: ContactLabelDisplay.text($0.label, fallback: ""), rawNumber: $0.rawNumber) }
+        emails = contact.emails.map { EditableEmail(label: ContactLabelDisplay.text($0.label, fallback: ""), address: $0.address) }
         addresses = contact.addresses.map { address in
             let original = ContactAddressBody(
                 formatted: address.formatted, label: address.label, street: address.street,
@@ -683,7 +683,7 @@ struct ContactEditView: View {
                 country: address.country
             )
             return EditableAddress(
-                label: address.label ?? "", text: address.displayText,
+                label: ContactLabelDisplay.text(address.label, fallback: ""), text: address.displayText,
                 original: original, originalText: address.displayText
             )
         }

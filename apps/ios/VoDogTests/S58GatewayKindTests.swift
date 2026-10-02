@@ -17,6 +17,10 @@ final class S58GatewayKindTests: XCTestCase {
         XCTAssertEqual(simGatewayIdentity(try sim(""), shortened: true), "PX-01234567")
         XCTAssertEqual(simGatewayIdentity(try sim(#","gatewayKind":null"#), shortened: false), "PX-0123456789abcdef")
         XCTAssertEqual(simGatewayIdentity(try sim(#","gatewayKind":"dji4g""#), shortened: true), "DJI-01234567")
+        // S91: a name wins; blank falls back to the id.
+        XCTAssertEqual(simGatewayIdentity(try sim(#","gatewayName":"Pixel 7 Pro""#), shortened: true), "Pixel 7 Pro")
+        XCTAssertEqual(simGatewayIdentity(try sim(#","gatewayName":"Pixel 7 Pro""#), shortened: false), "Pixel 7 Pro · PX-01234567")
+        XCTAssertEqual(simGatewayIdentity(try sim(#","gatewayName":"  ""#), shortened: true), "PX-01234567")
     }
 
     func testCallWordingFollowsGatewayKind() throws {
@@ -76,5 +80,18 @@ final class S58GatewayKindTests: XCTestCase {
         {"callId":"c1","startedAt":"t","sim":{"id":"s1","label":"SIM","slotIndex":0},"originatingPlatform":"pixel"}
         """#.utf8))
         XCTAssertEqual(RecordingSource.defaultSource(originatingPlatform: report.originatingPlatform), .pixel)
+    }
+
+    func testOwnerJoinedLocalDefaultsToDeviceArchiveAndRelabelsServerRecording() throws {
+        XCTAssertEqual(RecordingSource.defaultSource(originatingPlatform: "ios", ownerJoinedLocal: true), .pixel)
+        XCTAssertEqual(RecordingSource.defaultSource(originatingPlatform: "ios", ownerJoinedLocal: false), .mediaNode)
+        XCTAssertEqual(RecordingSource.mediaNode.title(ownerJoinedLocal: true), "服务器录音（不含本机接入）")
+        XCTAssertEqual(RecordingSource.pixel.title(ownerJoinedLocal: true), "Pixel 原始归档")
+        let base = #"{"callId":"c1","startedAt":"t","sim":{"id":"s1","label":"SIM","slotIndex":0}"#
+        XCTAssertFalse(try JSONDecoder().decode(CallReportItem.self, from: Data((base + "}").utf8)).ownerJoinedLocal)
+        XCTAssertTrue(try JSONDecoder().decode(CallReportItem.self, from: Data((base + #","ownerJoinedLocal":true}"#).utf8)).ownerJoinedLocal)
+        let call = try JSONDecoder().decode(CallRecord.self, from: Data(#"{"id":"c1","ownerJoinedLocal":true}"#.utf8))
+        XCTAssertEqual(call.ownerJoinedLocal, true)
+        XCTAssertNotEqual(try JSONDecoder().decode(CallRecord.self, from: Data(#"{"id":"c1"}"#.utf8)).ownerJoinedLocal, true)
     }
 }

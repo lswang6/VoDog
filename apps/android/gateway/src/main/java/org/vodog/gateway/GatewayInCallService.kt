@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 class GatewayInCallService : InCallService() {
     private val callbacks = mutableMapOf<Call, Call.Callback>()
     private var recordingForeground = false
+    private var lastLoggedRoute: Int? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -98,6 +99,7 @@ class GatewayInCallService : InCallService() {
         if (deviceCallId != null) restoreMuteLeaseLogged(deviceCallId, call.details.creationTimeMillis)
         if (stopped) GatewayAudioLifecycleCleanup.schedule(this, "ended")
         callbacks.remove(call)?.let(call::unregisterCallback)
+        lastLoggedRoute = null
         GatewayTelecomCallRegistry.remove(call)
         if (deviceCallId != null) DeviceCallJournal(this).markEnded(deviceCallId)
         wakeGatewayIfEnabled()
@@ -133,6 +135,14 @@ class GatewayInCallService : InCallService() {
     override fun onCallAudioStateChanged(audioState: CallAudioState) {
         super.onCallAudioStateChanged(audioState)
         GatewayInCallAudioBridge.onAudioState(this, audioState.isMuted)
+        // S94: speaker alone is listening in, not a takeover; one row per route change of a live session.
+        GatewayActiveAudioSession.current()?.let { holder ->
+            if (audioState.route != lastLoggedRoute) {
+                lastLoggedRoute = audioState.route
+                GatewayDiag.log("call.owner_route_local", mapOf("route" to CallAudioState.audioRouteToString(audioState.route)),
+                    callId = holder.serverCallId)
+            }
+        }
         // Carrier video ringback flips the call to a video state and Telecom auto-routes to speaker; the gateway never wants speaker.
         val videoStates = calls.map { it.details.videoState }
         if (shouldRevertVideoSpeaker(audioState.route, videoStates)) {

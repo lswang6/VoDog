@@ -21,9 +21,14 @@ internal data class ClientSim(
     val timeZone: String? = null,
     val answerMode: String? = null,
     val gatewayKind: GatewayKind = GatewayKind.PIXEL,
+    /** S91：`gateways.name`；旧 Control 没有该字段时为 null。 */
+    val gatewayName: String? = null,
 ) {
-    val gatewayShortLabel: String get() = gatewayId?.let(gatewayKind::shortLabel) ?: "网关待确认"
-    val gatewayFullLabel: String get() = gatewayId?.let { "${gatewayKind.shortPrefix}-$it" } ?: "网关身份待确认"
+    val gatewayShortLabel: String get() = gatewayId?.let { gatewayKind.shortLabel(it, gatewayName) } ?: "网关待确认"
+    /** S91：有名字时「名字 · 短编号」（同名网关仍可区分），否则完整编号。 */
+    val gatewayFullLabel: String get() = gatewayId?.let { id ->
+        gatewayName?.trim()?.takeIf(String::isNotEmpty)?.let { "$it · ${gatewayKind.shortLabel(id)}" } ?: "${gatewayKind.shortPrefix}-$id"
+    } ?: "网关身份待确认"
     val displayLabel: String get() = phoneLabel?.takeIf(String::isNotBlank) ?: label
     val canCall: Boolean get() = present && !assignmentPending && online && telephonyReady && mediaReady
     val canSms: Boolean get() = present && !assignmentPending && online && smsReady
@@ -57,6 +62,7 @@ internal fun JSONObject.toClientSim(): ClientSim = ClientSim(
     timeZone = nullableText("timeZone"),
     answerMode = optJSONObject("settings")?.nullableText("mode"),
     gatewayKind = gatewayKind(),
+    gatewayName = nullableText("gatewayName"),
 )
 
 /**
@@ -68,7 +74,9 @@ enum class GatewayKind(val shortPrefix: String, val deviceName: String, val dire
     DJI4G("DJI", "DJI 4G 模组", "通过 DJI 4G 模组拨打", "DJI 4G 原始归档");
 
     val occupiedLabel: String get() = "${deviceName}通话中"
-    fun shortLabel(gatewayId: String): String = "$shortPrefix-${gatewayId.take(8)}"
+    /** S91：网关名非空时显示名字，否则 `PX-xxxxxxxx` / `DJI-xxxxxxxx`。 */
+    fun shortLabel(gatewayId: String, name: String? = null): String =
+        name?.trim()?.takeIf(String::isNotEmpty) ?: "$shortPrefix-${gatewayId.take(8)}"
 
     companion object {
         fun of(wire: String?): GatewayKind = if (wire == "dji4g") DJI4G else PIXEL

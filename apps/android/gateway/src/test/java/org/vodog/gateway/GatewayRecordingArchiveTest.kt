@@ -315,6 +315,77 @@ class GatewayRecordingArchiveTest {
         root.deleteRecursively()
     }
 
+    /** S94: v4 adds caller_uplink as an `uplink_capture` original; originals and derived are unchanged. */
+    @Test fun manifestV4UploadsUplinkTrackAndFinalizesVersionFour() {
+        val root = Files.createTempDirectory("archive-v4").toFile()
+        val callId = "94949494-9494-4494-8494-949494949494"
+        val recorder = LocalCallRecorder(root, callId, binding(callId)) { Instant.parse("2026-10-01T00:00:00Z") }
+        recorder.append(OriginalAudioTrack.REMOTE_ORIGINAL, ByteArray(640) { 1 }, 0)
+        recorder.append(OriginalAudioTrack.CALLER_ORIGINAL, ByteArray(640) { 2 }, 0)
+        recorder.appendPlayout(ByteArray(640) { 9 }, 0, null, null)
+        recorder.appendUplink(ByteArray(640) { 4 }, 0)
+        recorder.markCaptureGapDuration(UplinkAudioTrack.CALLER_UPLINK, 0, 20_000)
+        recorder.finish("ended")
+        val control = WatermarkControl().apply { loseFirstResponse = false }
+        val journal = RecordingArchiveJournal(root)
+
+        processRecordingArchive(journal, control, callId, cleanup = { _, _, _ -> Unit })
+
+        assertTrue(control.finalized)
+        assertEquals(setOf("remote_original.wav.gz", "caller_original.wav.gz", "timeline.jsonl.gz", "caller_playout.wav.gz",
+            "caller_uplink.wav.gz"), requireNotNull(journal.read(callId)).objects.map { it.name }.toSet())
+        val upload = JSONObject(File(root, "$callId/manifest.v4.upload.json").readText())
+        assertEquals(4, upload.getInt("version"))
+        assertEquals(2, upload.getJSONArray("tracks").length())
+        assertEquals(1, upload.getJSONArray("derivedTracks").length())
+        val uplink = upload.getJSONArray("uplinkTracks").getJSONObject(0)
+        assertEquals(setOf("track", "sourceRole", "objectName", "mediaType", "pcm", "compressedBytes", "compressedSha256",
+            "originalBytes", "originalSha256", "pcmBytes", "gapCount", "droppedFrames", "captureComplete"), uplink.keys().asSequence().toSet())
+        assertEquals("caller_uplink", uplink.getString("track"))
+        assertEquals("uplink_capture", uplink.getString("sourceRole"))
+        assertEquals("caller_uplink.wav.gz", uplink.getString("objectName"))
+        assertEquals(640L, uplink.getLong("pcmBytes")); assertEquals(684L, uplink.getLong("originalBytes"))
+        assertEquals(1L, uplink.getLong("gapCount")); assertFalse(uplink.getBoolean("captureComplete"))
+        // The originals' completeness is unaffected by a silenced uplink.
+        assertTrue(upload.getJSONArray("tracks").getJSONObject(0).getBoolean("captureComplete"))
+        root.deleteRecursively()
+    }
+
+    @Test fun manifestV4WithoutPlayoutOmitsDerivedTracks() {
+        val root = Files.createTempDirectory("archive-v4-nod").toFile()
+        val callId = "94949494-9494-4494-8494-949494949495"
+        val recorder = LocalCallRecorder(root, callId, binding(callId)) { Instant.parse("2026-10-01T00:00:00Z") }
+        recorder.append(OriginalAudioTrack.REMOTE_ORIGINAL, ByteArray(640) { 1 }, 0)
+        recorder.append(OriginalAudioTrack.CALLER_ORIGINAL, ByteArray(640) { 2 }, 0)
+        recorder.appendUplink(ByteArray(640) { 4 }, 0)
+        recorder.finish("ended")
+        processRecordingArchive(RecordingArchiveJournal(root), WatermarkControl().apply { loseFirstResponse = false }, callId,
+            cleanup = { _, _, _ -> Unit })
+        val upload = JSONObject(File(root, "$callId/manifest.v4.upload.json").readText())
+        assertFalse(upload.has("derivedTracks"))
+        assertTrue(upload.getJSONArray("uplinkTracks").getJSONObject(0).getBoolean("captureComplete"))
+        root.deleteRecursively()
+    }
+
+    @Test fun manifestV4FinalizeAcceptsServerVersionFour() {
+        val server = MockWebServer()
+        val uploadId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"
+        val callId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"
+        val fingerprint = "a".repeat(64)
+        val response = JSONObject().put("archive", JSONObject()
+            .put("id", uploadId).put("callId", callId).put("source", "pixel").put("version", 4)
+            .put("state", "complete").put("completedAt", "2026-10-01T00:00:00.000Z")
+            .put("manifestSha256", fingerprint))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(response.toString()))
+        server.start()
+        val control = HttpRecordingArchiveControl("device-token", server.url("/api/v1").toString().removeSuffix("/"))
+        try {
+            assertEquals("complete", control.finalize(uploadId, callId, fingerprint, 4))
+        } finally {
+            control.close(); server.shutdown()
+        }
+    }
+
     /** S39 §决策3 revises the S31 B rule: a verified 410 deletes the local copy either way. */
     @Test fun deletedIncompleteArchiveIsCleanedUpBecauseTheUserDeletedTheCall() {
         val root = Files.createTempDirectory("archive-deleted-cleanup").toFile()
@@ -637,12 +708,12 @@ private class WatermarkControl : RecordingArchiveControl {
                 val value = tracks.getJSONObject(index)
                 add(ArchiveObject(value.getString("objectName"), value.getLong("compressedBytes"), "", 0, ""))
             }
-            manifest.optJSONArray("derivedTracks")?.let { derived ->
+            listOf("derivedTracks", "uplinkTracks").forEach { key -> manifest.optJSONArray(key)?.let { derived ->
                 repeat(derived.length()) { index ->
                     val value = derived.getJSONObject(index)
                     add(ArchiveObject(value.getString("objectName"), value.getLong("compressedBytes"), "", 0, ""))
                 }
-            }
+            } }
             val timeline = manifest.getJSONObject("timeline")
             add(ArchiveObject(timeline.getString("objectName"), timeline.getLong("compressedBytes"), "", 0, ""))
         }
@@ -676,7 +747,11 @@ private class WatermarkControl : RecordingArchiveControl {
     override fun finalize(uploadId: String, callId: String, manifestSha256: String, version: Int): String {
         assertTrue(objects.all { offsets.getValue(it.name) == it.compressedBytes })
         assertEquals(fingerprint, manifestSha256)
-        assertEquals(if (objects.any { it.name == "caller_playout.wav.gz" }) 3 else 2, version)
+        assertEquals(when {
+            objects.any { it.name == "caller_uplink.wav.gz" } -> 4
+            objects.any { it.name == "caller_playout.wav.gz" } -> 3
+            else -> 2
+        }, version)
         finalized = true
         return "complete"
     }

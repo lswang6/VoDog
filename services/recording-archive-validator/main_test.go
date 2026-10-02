@@ -293,3 +293,41 @@ func TestValidateTimelineRejectsOverlongLineAsFormatError(t *testing.T) {
 		t.Fatalf("overlong line must be an invalid archive, got %v", err)
 	}
 }
+
+func TestVerifyV4TimelineAcceptsUplinkOnlyWithItsBound(t *testing.T) {
+	d := t.TempDir()
+	valid := "{\"event\":\"start\",\"timestampUs\":0}\n" +
+		"{\"event\":\"frame\",\"track\":\"caller_uplink\",\"timestampUs\":0,\"sourceTimestampUs\":5000,\"fileOffset\":44,\"sampleCount\":320}\n" +
+		"{\"event\":\"gap\",\"track\":\"caller_uplink\",\"timestampUs\":20000,\"durationUs\":20000}\n" +
+		"{\"event\":\"gap\",\"track\":\"caller_uplink\",\"timestampUs\":40000,\"reason\":\"local_queue_drop\",\"frames\":1}\n" +
+		"{\"event\":\"stop\",\"state\":\"ended\"}\n"
+	path := filepath.Join(d, "timeline.jsonl")
+	if err := os.WriteFile(path, []byte(valid), 0600); err != nil {
+		t.Fatal(err)
+	}
+	v4 := timelineBounds{"remote_original": 44, "caller_original": 44, "caller_uplink": 684}
+	if err := validateJSONL(path, v4); err != nil {
+		t.Fatal(err)
+	}
+	for _, bounds := range []timelineBounds{
+		{"remote_original": 44, "caller_original": 44},
+		{"remote_original": 44, "caller_original": 44, "caller_playout": 684},
+	} {
+		if err := validateJSONL(path, bounds); err == nil || !isInvalidArchive(err) {
+			t.Fatalf("uplink frame accepted without its bound %v: %v", bounds, err)
+		}
+	}
+	for i, body := range []string{
+		strings.Replace(valid, "\"sampleCount\":320}", "\"sampleCount\":320,\"recoveryKind\":\"plc\"}", 1),
+		strings.Replace(valid, "\"sampleCount\":320", "\"sampleCount\":321", 1),
+		strings.Replace(valid, "\"event\":\"frame\",\"track\":\"caller_uplink\"", "\"event\":\"playout_frame\",\"track\":\"caller_uplink\"", 1),
+		"{\"event\":\"gap\",\"track\":\"caller_uplink\",\"timestampUs\":0,\"reason\":\"media_buffer_discard\"}\n",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateJSONL(path, v4); err == nil || !isInvalidArchive(err) {
+			t.Fatalf("invalid v4 timeline %d accepted: %v", i, err)
+		}
+	}
+}

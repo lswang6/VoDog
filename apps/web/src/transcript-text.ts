@@ -10,7 +10,7 @@ export type TranscriptSegment={track:string;speaker?:string|null;text:string;sta
 export type TranscriptBlock={track:string;speaker:string;text:string;startMs?:number};
 
 export function transcriptTrackLabel(track:string):string{
- return track==='remote_original'?'对方原声':track==='caller_original'?'我的原声':track==='caller_playout'?'通话播放声（含补偿）':'其他声轨';
+ return track==='remote_original'?'对方原声':track==='caller_original'?'我的原声':track==='caller_playout'?'通话播放声（含补偿）':track==='caller_uplink'?'本机上行（含本机接入）':'其他声轨';
 }
 
 const NO_SPACE_BEFORE=/^[\s,.;:!?%)}\]\u3001\u3002\uff0c\uff01\uff1f\uff1b\uff1a]/u;

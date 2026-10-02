@@ -91,6 +91,8 @@ export class TranscriptCollector {
     const text = String(event?.text ?? '');
     // Caller transcription arrives as cumulative updates then one final text.
     if (event?.speaker === 'caller') { if (event.final === true) this.holdCaller(text); return; }
+    // A standalone AI final (the Doubao greeting) is posted now: its completed may never match its key.
+    if (event?.immediate === true) { this.flushCaller(); this.enqueue('ai', text); return; }
     const key = event?.responseId ?? '';
     this.buffers.set(key, `${this.buffers.get(key) ?? ''}${text}`.slice(0, MAX_TEXT));
     while (this.buffers.size > MAX_BUFFERS) this.flushResponse(this.buffers.keys().next().value);

@@ -1,6 +1,6 @@
 import {createHash,randomBytes} from 'node:crypto';
 import type {PoolClient,QueryResult} from 'pg';
-import {safeRollback,withClient,type Db} from '../db.js';
+import {tx,type Db} from '../db.js';
 
 type Queryable={query:(sql:string,params?:unknown[])=>Promise<QueryResult<any>>};
 export const AI_PROTOCOL='voice-run-v1';
@@ -105,26 +105,23 @@ export async function createAiRunForIncoming(c:PoolClient,input:{enabled:boolean
 
 export async function claimAiRun(db:Db,input:{enabled:boolean;instanceId:string;bootId:string;prewarmSeconds?:number}){
   if(!input.enabled)return null;
-  return withClient(db,async c=>{
-   try{
-    await c.query('BEGIN');
+  // A retry mints a fresh lease token: only the attempt that commits hands one out.
+  return tx(db,async c=>{
     const worker=await c.query(`SELECT 1 FROM ai_worker_instances WHERE instance_id=$1 AND boot_id=$2 AND protocol=$3 AND expires_at>now() FOR UPDATE`,[input.instanceId,input.bootId,AI_PROTOCOL]);
     if(!worker.rowCount)throw new AiRunError(409,'AI_WORKER_STALE','Voice worker heartbeat is stale');
     const occupied=await c.query(`SELECT 1 FROM ai_call_runs WHERE lease_owner=$1 AND lease_boot_id=$2 AND lease_until>now()
       AND state IN ('preparing','answer_committed','awaiting_active','active') LIMIT 1`,[input.instanceId,input.bootId]);
-    if(occupied.rowCount){await c.query('COMMIT');return null;}
+    if(occupied.rowCount)return null;
     const q=await c.query(`SELECT run.* FROM ai_call_runs run JOIN call_records call ON call.id=run.call_id
       WHERE run.state='pending' AND run.attempts<3 AND COALESCE(run.next_attempt_at,run.trigger_at)<=now()+$1::int*interval '1 second'
         AND call.state='incoming_ringing' AND call.ai_run_id=run.id
       ORDER BY COALESCE(run.next_attempt_at,run.trigger_at),run.id FOR UPDATE OF run SKIP LOCKED LIMIT 1`,[Math.min(60,Math.max(0,input.prewarmSeconds??30))]);
-    if(!q.rowCount){await c.query('COMMIT');return null;}
+    if(!q.rowCount)return null;
     const token=leaseToken(),row=(await c.query(`UPDATE ai_call_runs SET state='preparing',attempts=attempts+1,
       lease_owner=$2,lease_boot_id=$3,lease_hash=$4,lease_until=now()+$5::int*interval '1 second',updated_at=now()
       WHERE id=$1 RETURNING *`,[q.rows[0].id,input.instanceId,input.bootId,leaseHash(token),AI_LEASE_SECONDS])).rows[0];
-    await c.query('COMMIT');
     return{run:runDto(row),leaseToken:token,leaseExpiresAt:row.lease_until};
-   }catch(error){await safeRollback(c);throw error;}
-  });
+  },'ai.claim');
 }
 
 export async function renewAiLease(db:Queryable,input:{runId:string;instanceId:string;bootId:string;token:string}){
@@ -141,9 +138,9 @@ export async function commitAiAnswer(db:Db,input:{enabled:boolean;runId:string;i
   if(!input.enabled)throw new AiRunError(503,'AI_DISABLED','AI answering is disabled');
   const target=await db.query(`SELECT gateway_id,call_id FROM ai_call_runs WHERE id=$1`,[input.runId]);
   if(!target.rowCount)throw new AiRunError(404,'AI_RUN_NOT_FOUND','AI run was not found');
-  return withClient(db,async c=>{
-   try{
-    await c.query('BEGIN');
+  // The lost_race branch must persist its state change and still answer 409, so the closure returns it
+  // as a value (tx commits) and the error is thrown only after the commit.
+  const result=await tx(db,async c=>{
     const gateway=(await c.query(`SELECT *,${DEBOUNCED_CAPABILITIES} FROM gateways WHERE id=$1 FOR UPDATE`,[target.rows[0].gateway_id])).rows[0];
     const call=(await c.query(`SELECT call.*,sim.owner_user_id,sim.version assignment_version,sim.device_present,sim.assignment_pending
       FROM call_records call JOIN sims sim ON sim.id=call.sim_id WHERE call.id=$1 FOR UPDATE OF call,sim`,[target.rows[0].call_id])).rows[0];
@@ -151,10 +148,10 @@ export async function commitAiAnswer(db:Db,input:{enabled:boolean;runId:string;i
     if(!run||call?.ai_run_id!==run.id)throw new AiRunError(409,'AI_LOST_RACE','AI run no longer owns this incoming call');
     assertLease(run,input);
     await assertWorker(c,input);
-    if(run.answer_command_id){const command=(await c.query(`SELECT id,generation,sequence,expires_at FROM commands WHERE id=$1`,[run.answer_command_id])).rows[0];await c.query('COMMIT');return{run:runDto(run),command,replayed:true};}
+    if(run.answer_command_id){const command=(await c.query(`SELECT id,generation,sequence,expires_at FROM commands WHERE id=$1`,[run.answer_command_id])).rows[0];return{kind:'ok' as const,run:runDto(run),command,replayed:true};}
     if(run.state!=='preparing'||call.state!=='incoming_ringing'){
       await c.query(`UPDATE ai_call_runs SET state='lost_race',lease_hash=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND answer_command_id IS NULL`,[run.id]);
-      await c.query('COMMIT');throw new AiRunError(409,'AI_LOST_RACE','Another endpoint already handled this call');
+      return{kind:'lost_race' as const};
     }
     if(new Date(run.trigger_at).getTime()>Date.now())throw new AiRunError(409,'AI_TRIGGER_NOT_DUE','AI answer timeout has not elapsed');
     const gatewayReady=gateway.control_enabled&&gateway.telephony_ready_debounced&&gateway.media_ready_debounced&&gateway.last_seen_at&&Date.now()-new Date(gateway.last_seen_at).getTime()<=input.onlineSeconds*1000;
@@ -184,9 +181,10 @@ export async function commitAiAnswer(db:Db,input:{enabled:boolean;runId:string;i
       gateway.id,call.id,run.device_generation,sequence,JSON.stringify({callId:call.id,deviceCallId:call.device_call_id,answeredBy:'ai'}),
     ])).rows[0];
     const updated=(await c.query(`UPDATE ai_call_runs SET state='answer_committed',answer_command_id=$2,updated_at=now() WHERE id=$1 RETURNING *`,[run.id,command.id])).rows[0];
-    await c.query('COMMIT');return{run:runDto(updated),command,replayed:false};
-   }catch(error){await safeRollback(c);throw error;}
-  });
+    return{kind:'ok' as const,run:runDto(updated),command,replayed:false};
+  },'ai.commit_answer');
+  if(result.kind==='lost_race')throw new AiRunError(409,'AI_LOST_RACE','Another endpoint already handled this call');
+  return{run:result.run,command:result.command,replayed:result.replayed};
 }
 
 export async function markHumanWinner(c:PoolClient,callId:string){
@@ -248,9 +246,7 @@ export async function readAiRun(db:Queryable,input:{runId:string;instanceId:stri
 export async function failAiRun(db:Db,input:{runId:string;instanceId:string;bootId:string;token:string;code:string}){
   const target=await db.query(`SELECT gateway_id,call_id FROM ai_call_runs WHERE id=$1`,[input.runId]);
   if(!target.rowCount)throw new AiRunError(404,'AI_RUN_NOT_FOUND','AI run was not found');
-  return withClient(db,async c=>{
-   try{
-    await c.query('BEGIN');
+  return tx(db,async c=>{
     await c.query(`SELECT id FROM gateways WHERE id=$1 FOR UPDATE`,[target.rows[0].gateway_id]);
     const call=(await c.query(`SELECT * FROM call_records WHERE id=$1 FOR UPDATE`,[target.rows[0].call_id])).rows[0];
     const run=(await c.query(`SELECT * FROM ai_call_runs WHERE id=$1 FOR UPDATE`,[input.runId])).rows[0];assertLease(run,input);
@@ -267,17 +263,14 @@ export async function failAiRun(db:Db,input:{runId:string;instanceId:string;boot
       await c.query(`UPDATE ai_call_runs SET state=CASE WHEN state='ended' THEN state ELSE 'ending' END,cleanup_required=true,failure_code=$2,
         lease_hash=NULL,lease_until=NULL,lease_owner=NULL,lease_boot_id=NULL,next_attempt_at=now(),updated_at=now() WHERE id=$1`,[run.id,input.code]);
     }
-    await c.query('COMMIT');return{accepted:true};
-   }catch(error){await safeRollback(c);throw error;}
-  });
+    return{accepted:true};
+  },'ai.fail');
 }
 
 export async function authorizeAiMedia(db:Db,input:{runId:string;instanceId:string;bootId:string;token:string;onlineSeconds:number;markAttempted?:boolean}){
   const target=await db.query(`SELECT gateway_id,call_id FROM ai_call_runs WHERE id=$1`,[input.runId]);
   if(!target.rowCount)throw new AiRunError(404,'AI_RUN_NOT_FOUND','AI run was not found');
-  return withClient(db,async c=>{
-   try{
-    await c.query('BEGIN');
+  return tx(db,async c=>{
     const gateway=(await c.query(`SELECT *,${DEBOUNCED_CAPABILITIES} FROM gateways WHERE id=$1 FOR UPDATE`,[target.rows[0].gateway_id])).rows[0];
     const call=(await c.query(`SELECT * FROM call_records WHERE id=$1 FOR UPDATE`,[target.rows[0].call_id])).rows[0];
     const run=(await c.query(`SELECT * FROM ai_call_runs WHERE id=$1 FOR UPDATE`,[input.runId])).rows[0];
@@ -290,30 +283,25 @@ export async function authorizeAiMedia(db:Db,input:{runId:string;instanceId:stri
       if(run.media_attempted_at)throw new AiRunError(409,'AI_MEDIA_ALREADY_ATTEMPTED','AI media offer was already attempted');
       await c.query(`UPDATE ai_call_runs SET media_attempted_at=now(),updated_at=now() WHERE id=$1 AND media_attempted_at IS NULL`,[run.id]);
     }
-    await c.query('COMMIT');
     return{callId:call.id,nodeId:call.media_node_id as string,mediaEpoch:Number(call.media_epoch),state:run.state as AiRunState};
-   }catch(error){await safeRollback(c);throw error;}
-  });
+  },'ai.media.authorize');
 }
 
 export async function markAiMediaFailure(db:Db,runId:string,code:string){
   const target=await db.query(`SELECT gateway_id,call_id FROM ai_call_runs WHERE id=$1`,[runId]);if(!target.rowCount)return null;
-  return withClient(db,async c=>{
-   try{
-    await c.query('BEGIN');
+  return tx(db,async c=>{
     await c.query(`SELECT id FROM gateways WHERE id=$1 FOR UPDATE`,[target.rows[0].gateway_id]);
     const call=(await c.query(`SELECT * FROM call_records WHERE id=$1 FOR UPDATE`,[target.rows[0].call_id])).rows[0];
     const run=(await c.query(`SELECT * FROM ai_call_runs WHERE id=$1 FOR UPDATE`,[runId])).rows[0];
-    if(!run||!call){await c.query('ROLLBACK');return null;}
+    if(!run||!call)return null;
     if(run.answer_command_id||run.media_attempted_at){
       await c.query(`UPDATE call_records SET state=CASE WHEN state IN ('ended','failed') THEN state ELSE 'ending'::call_state END,
         failure_reason=COALESCE(failure_reason,$2) WHERE id=$1`,[call.id,code]);
       await c.query(`UPDATE ai_call_runs SET state=CASE WHEN state='ended' THEN state ELSE 'ending' END,cleanup_required=true,
         failure_code=$2,lease_hash=NULL,lease_until=NULL,lease_owner=NULL,lease_boot_id=NULL,next_attempt_at=now(),updated_at=now() WHERE id=$1`,[run.id,code]);
     }
-    await c.query('COMMIT');return{callId:call.id};
-   }catch(error){await safeRollback(c);throw error;}
-  });
+    return{callId:call.id};
+  },'ai.media.failure');
 }
 
 export function assertLease(row:any,input:{runId?:string;instanceId:string;bootId:string;token:string}){

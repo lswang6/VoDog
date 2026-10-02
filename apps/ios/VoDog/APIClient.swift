@@ -50,9 +50,7 @@ struct APIClient: Sendable {
         idempotencyKey: String? = nil, timeoutInterval: TimeInterval? = nil,
         queryItems: [URLQueryItem] = [], headers: [String: String] = [:]
     ) async throws -> Response {
-        var components = URLComponents(url: Self.baseURL.appending(path: path), resolvingAgainstBaseURL: false)
-        if !queryItems.isEmpty { components?.queryItems = queryItems }
-        guard let url = components?.url else { throw APIError.invalidResponse }
+        let url = try Self.url(path, queryItems: queryItems)
         var request = URLRequest(url: url)
         request.httpMethod = method
         if let timeoutInterval { request.timeoutInterval = timeoutInterval }
@@ -77,7 +75,7 @@ struct APIClient: Sendable {
     }
 
     func recordingPreflight(_ path: String, source: RecordingSource) async throws -> RecordingPreflightResponse {
-        var request = URLRequest(url: try url(path, queryItems: [.init(name: "source", value: source.rawValue)]))
+        var request = URLRequest(url: try Self.url(path, queryItems: [.init(name: "source", value: source.rawValue)]))
         request.httpMethod = "GET"
         request.setValue(source == .pixel ? "audio/wav" : "audio/ogg", forHTTPHeaderField: "Accept")
         request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
@@ -95,7 +93,7 @@ struct APIClient: Sendable {
         var items = [URLQueryItem(name: "source", value: source.rawValue)]
         if let disposition { items.append(URLQueryItem(name: "disposition", value: disposition)) }
         if let format { items.append(URLQueryItem(name: "format", value: format)) }
-        var request = URLRequest(url: try url(path, queryItems: items))
+        var request = URLRequest(url: try Self.url(path, queryItems: items))
         request.httpMethod = "GET"
         request.setValue(RecordingAttachmentName.mediaType(source: source, format: format), forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -125,9 +123,14 @@ struct APIClient: Sendable {
         )
     }
 
-    private func url(_ path: String, queryItems: [URLQueryItem]) throws -> URL {
-        var components = URLComponents(url: Self.baseURL.appending(path: path), resolvingAgainstBaseURL: false)
-        components?.queryItems = queryItems
+    /// URLComponents leaves "+" bare and Fastify decodes it as a space (S89 cursor "+08:00", "+86" lookups).
+    static func url(_ path: String, queryItems: [URLQueryItem], base: URL = baseURL) throws -> URL {
+        var components = URLComponents(url: base.appending(path: path), resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+            let encoded = components?.percentEncodedQuery
+            components?.percentEncodedQuery = encoded?.replacingOccurrences(of: "+", with: "%2B")
+        }
         guard let result = components?.url else { throw APIError.invalidResponse }
         return result
     }

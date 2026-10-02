@@ -35,6 +35,31 @@ struct DevicePostalAddress: Sendable, Equatable {
     var country: String?
 }
 
+/// Stored labels stay the English type names imports carry (`mobile`, `home`, ...); only the screen shows Chinese.
+/// Same words as the Android client `contactLabelText` (Formatting.kt) — Web `PHONE_LABELS` is a subset and
+/// says 寻呼 for pager.
+enum ContactLabelDisplay {
+    /// Order matters for `stored`: the first key of a shared word (mobile before cell) is the one saved back.
+    static let words: [(key: String, text: String)] = [
+        ("mobile", "手机"), ("cell", "手机"), ("home", "住宅"), ("work", "工作"), ("main", "主要"),
+        ("iphone", "iPhone"), ("work_mobile", "工作手机"), ("work mobile", "工作手机"),
+        ("home_fax", "住宅传真"), ("home fax", "住宅传真"), ("work_fax", "工作传真"), ("work fax", "工作传真"),
+        ("fax", "传真"), ("pager", "寻呼机"), ("company_main", "公司总机"), ("company main", "公司总机"),
+        ("other", "其他"),
+    ]
+
+    static func text(_ stored: String?, fallback: String) -> String {
+        guard let value = ContactImportMapping.trimmed(stored) else { return fallback }
+        return words.first { $0.key == value.lowercased() }?.text ?? value
+    }
+
+    /// The editor shows `text`; saving maps a known word back so the stored value does not drift to Chinese.
+    static func stored(_ edited: String?) -> String? {
+        guard let value = ContactImportMapping.trimmed(edited) else { return nil }
+        return words.first { $0.text == value }?.key ?? value
+    }
+}
+
 /// S21 decision 2: the client formats and uploads, it never decides what is a duplicate. Everything here is
 /// presentation-level normalisation — trimming, label decoration, dropping records the server could not use —
 /// and the matching/merging stays in Control.

@@ -115,6 +115,7 @@ export function registerTranscriptionRoutes(app: FastifyInstance, db: Pool, depe
         c.internal_call,c.peer_call_id,c.peer_sim_id,COALESCE(NULLIF(ps.label,''),ps.phone_label) peer_sim_label,
         j.state job_state,j.result,j.completed_at,j.error_code,
         EXISTS(SELECT 1 FROM ai_run_transcripts t WHERE t.call_id=c.id) has_ai_transcript,
+        EXISTS(SELECT 1 FROM ai_call_runs r WHERE r.id=c.ai_run_id AND r.failure_code='owner_joined') owner_joined_local,
         (${PENDING_CALL}) unseen
       ${from}
       ORDER BY c.started_at DESC,c.id DESC LIMIT $10${parameters.page === undefined ? '' : ' OFFSET $11'}`,
@@ -147,6 +148,8 @@ export function registerTranscriptionRoutes(app: FastifyInstance, db: Pool, depe
           originatingPlatform: row.originating_platform, conflictDisposition: row.conflict_disposition ?? null,
           // S58: the recording sheet labels a DJI 4G call's device track by the gateway's hardware.
           gatewayKind: row.gateway_kind ?? null,
+          // S94b: the owner joined locally, so only the Pixel archive holds both voices.
+          ownerJoinedLocal: row.owner_joined_local === true,
           // S72: internal call (own hosted SIM ↔ own hosted SIM) and the other leg's SIM.
           internal: row.internal_call === true, peerCallId: row.peer_call_id ?? null, peerSimId: row.peer_sim_id ?? null, peerSimLabel: row.peer_sim_label ?? null,
           recordingStatus: row.recording_status,

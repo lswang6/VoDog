@@ -15,6 +15,8 @@ object GatewayApiRoutes {
     fun mediaOffer(callId: String) = "/gateway/calls/${encodePathSegment(callId)}/media/offer"
     /** S38 §4: the capture binding for a phone-dialled call, which has no media/options exchange. */
     fun captureBinding(callId: String) = "/gateway/calls/${encodePathSegment(callId)}/capture-binding"
+    /** S94: the owner took an AI-answered call over on the Pixel; idempotent by `eventId`. */
+    fun ownerJoined(callId: String) = "/gateway/calls/${encodePathSegment(callId)}/owner-joined"
     fun recordingArchives(callId: String) = "/gateway/calls/${encodePathSegment(callId)}/recording-archives"
     fun recordingArchive(uploadId: String) = "/gateway/recording-archives/${encodePathSegment(uploadId)}"
     fun recordingArchiveObject(uploadId: String, objectName: String) =
@@ -49,7 +51,8 @@ object GatewayApiRoutes {
         INCOMING_SMS, OUTGOING_SMS_OBSERVED, BLOCKLIST_PHONE_CHANGES, CALL_LOG_PURGE_ACK)
 
     internal fun isIdempotent(path: String): Boolean =
-        path in IDEMPOTENT_POSTS || (path.startsWith("/gateway/commands/") && path.endsWith("/ack"))
+        path in IDEMPOTENT_POSTS || (path.startsWith("/gateway/commands/") && path.endsWith("/ack")) ||
+            (path.startsWith("/gateway/calls/") && path.endsWith("/owner-joined"))
 
     internal fun encodePathSegment(value: String): String = buildString {
         value.toByteArray(Charsets.UTF_8).forEach { byte ->
@@ -421,6 +424,12 @@ class GatewayApi(
             .put("deviceCallId", deviceCallId)
             .put("telecomCreationTimeMillis", telecomCreationTimeMillis))
             .getJSONObject("captureBinding")
+
+    /** S94 b. 2xx and any 409 settle it; the caller retries 5xx / network failures with the same eventId. */
+    fun reportOwnerJoined(callId: String, eventId: String, generation: Long, deviceCallId: String,
+                          telecomCreationTimeMillis: Long): JSONObject =
+        post(GatewayApiRoutes.ownerJoined(callId), JSONObject().put("eventId", eventId).put("generation", generation)
+            .put("deviceCallId", deviceCallId).put("telecomCreationTimeMillis", telecomCreationTimeMillis))
 
     fun reportTelecomSnapshot(payload: JSONObject): TelecomSnapshotResult {
         val response = post(GatewayApiRoutes.TELECOM_SNAPSHOT, payload)

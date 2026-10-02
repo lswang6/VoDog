@@ -62,10 +62,28 @@ enum class OriginalTranscriptTrack(val wireValue: String, val label: String) {
     }
 }
 
+/**
+ * S94: transcript segments name the archive track they were cut from. `caller_uplink` is new, and any track
+ * this build does not know degrades to [OTHER] instead of failing the whole transcript.
+ */
+enum class TranscriptTrack(val wireValue: String, val label: String) {
+    REMOTE_ORIGINAL("remote_original", "对方原声"),
+    CALLER_ORIGINAL("caller_original", "我的原声"),
+    CALLER_UPLINK("caller_uplink", "本机上行（含本机接入）"),
+    OTHER("", "其他声轨");
+
+    companion object {
+        fun parse(value: String) = entries.firstOrNull { it != OTHER && it.wireValue == value } ?: OTHER
+    }
+}
+
 enum class RecordingAudioTrack(val wireValue: String, val label: String) {
     REMOTE_ORIGINAL("remote_original", "对方原声"),
     CALLER_ORIGINAL("caller_original", "我的原声"),
     CALLER_PLAYOUT("caller_playout", "通话播放声（含补偿）"),
+
+    /** S94: Pixel VOICE_UPLINK capture (archive v4), carries the owner speaking on the phone itself. */
+    CALLER_UPLINK("caller_uplink", "本机上行（含本机接入）"),
 
     /** S36 C4: 服务器按时间轴混好的双人对话，只有 MP3 导出一条路，清单里没有对应 artifact。 */
     CONVERSATION("conversation", "对话混音");
@@ -126,6 +144,8 @@ data class CallReportItem(
     val aiTranscriptUrl: String = "",
     val gatewayKind: GatewayKind = GatewayKind.PIXEL,
     val originatingPlatform: String? = null,
+    /** S94b：机主在本机接入过 AI 代接；服务器录音不含机主声音。缺省 false。 */
+    val ownerJoinedLocal: Boolean = false,
     /** S67c: Control's `unseen` (missing on old Control = false). */
     val unseen: Boolean = false,
     /** S72: 同一 owner 的托管卡互打；旧 Control 不发 = false。 */
@@ -139,7 +159,7 @@ data class CallReportItem(
 
     /** 设备上直拨的通话没有服务器录音，只有设备原始归档（`source=pixel`），默认直接打开它。 */
     val defaultRecordingSource: RecordingSource
-        get() = if (originatingPlatform == "pixel") RecordingSource.PIXEL else RecordingSource.MEDIA_NODE
+        get() = if (originatingPlatform == "pixel" || ownerJoinedLocal) RecordingSource.PIXEL else RecordingSource.MEDIA_NODE
 }
 
 internal const val TRANSCRIPT_STATE_NONE = "none"
@@ -185,14 +205,14 @@ data class CallReportPage(val window: ReportWindow, val paging: Page<CallReportI
 }
 
 data class TranscriptSegment(
-    val track: OriginalTranscriptTrack,
+    val track: TranscriptTrack,
     val speaker: String,
     val text: String,
     val startMs: Double?,
     val endMs: Double?,
 )
 data class TranscriptProvider(
-    val track: OriginalTranscriptTrack,
+    val track: TranscriptTrack,
     val provider: String,
     val model: String?,
     val version: String?,
@@ -204,7 +224,7 @@ data class TranscriptProvider(
  * track and speaker into running text; stored segments are never rewritten.
  */
 data class TranscriptBlock(
-    val track: OriginalTranscriptTrack,
+    val track: TranscriptTrack,
     val speaker: String,
     val text: String,
     val startMs: Double?,
@@ -271,7 +291,11 @@ enum class RecordingSource(val wireValue: String, val label: String) {
     PIXEL("pixel", "Pixel 原始归档");
 
     /** S58: 只有设备原始归档随网关类型换说法，wire 值恒为 `pixel`。 */
-    fun label(kind: GatewayKind): String = if (this == PIXEL) kind.archiveLabel else label
+    fun label(kind: GatewayKind, ownerJoinedLocal: Boolean = false): String = when {
+        this == PIXEL -> kind.archiveLabel
+        ownerJoinedLocal -> "服务器录音（不含本机接入）"
+        else -> label
+    }
 }
 
 data class RecordingArtifact(
@@ -282,7 +306,11 @@ data class RecordingArtifact(
     val captureComplete: Boolean?,
     val gapCount: Long,
     val droppedFrames: Long,
-    val sourceRole: String = if (track == RecordingAudioTrack.CALLER_PLAYOUT) "derived_playout" else "original_capture",
+    val sourceRole: String = when (track) {
+        RecordingAudioTrack.CALLER_PLAYOUT -> "derived_playout"
+        RecordingAudioTrack.CALLER_UPLINK -> "uplink_capture"
+        else -> "original_capture"
+    },
     val playoutComplete: Boolean? = null,
     val recoveryFrames: Long = 0,
     val durationMs: Long? = null,
@@ -307,9 +335,15 @@ data class RecordingManifest(
     val captureComplete: Boolean?,
     val artifacts: List<RecordingArtifact>,
     val derivedArtifacts: List<RecordingArtifact> = emptyList(),
+    /** S94: the optional Pixel `caller_uplink` track (descriptor `archiveVersion: 4`). */
+    val uplinkArtifacts: List<RecordingArtifact> = emptyList(),
 ) {
     fun artifact(track: OriginalTranscriptTrack) = artifact(track.recordingAudioTrack())
-    fun artifact(track: RecordingAudioTrack) = (artifacts + derivedArtifacts).singleOrNull { it.track == track }
+    fun artifact(track: RecordingAudioTrack) = (artifacts + derivedArtifacts + uplinkArtifacts).singleOrNull { it.track == track }
+
+    /** S94: with an uplink track the owner-joined pair is the default; otherwise the original pair. */
+    val defaultPairMode: RecordingPairMode
+        get() = if (pairArtifacts(RecordingPairMode.OWNER_JOINED).isNotEmpty()) RecordingPairMode.OWNER_JOINED else RecordingPairMode.ORIGINALS
 
     fun pairArtifacts(mode: RecordingPairMode): List<RecordingArtifact> {
         val requestedTracks = when (mode) {
@@ -318,11 +352,20 @@ data class RecordingManifest(
                 if (source != RecordingSource.PIXEL || version != 3) return emptyList()
                 listOf(RecordingAudioTrack.REMOTE_ORIGINAL, RecordingAudioTrack.CALLER_PLAYOUT)
             }
+            RecordingPairMode.OWNER_JOINED -> {
+                if (source != RecordingSource.PIXEL) return emptyList()
+                listOf(RecordingAudioTrack.REMOTE_ORIGINAL, RecordingAudioTrack.CALLER_UPLINK)
+            }
+        }
+        val secondRole = when (mode) {
+            RecordingPairMode.ORIGINALS -> "original_capture"
+            RecordingPairMode.COMPENSATED -> "derived_playout"
+            RecordingPairMode.OWNER_JOINED -> "uplink_capture"
         }
         return requestedTracks.map { artifact(it) ?: return emptyList() }.takeIf { selected ->
             selected.all { it.bytes > 0 } &&
                 selected[0].sourceRole == "original_capture" &&
-                selected[1].sourceRole == if (mode == RecordingPairMode.ORIGINALS) "original_capture" else "derived_playout"
+                selected[1].sourceRole == secondRole
         }.orEmpty()
     }
 
@@ -466,7 +509,7 @@ internal fun callLineLabel(sim: JSONObject?): String? {
     val number = sim.nullableString("phoneLabel")?.takeIf(String::isNotBlank)
         ?: sim.nullableString("label")?.takeIf(String::isNotBlank)
         ?: "未命名号码"
-    val gateway = sim.nullableString("gatewayId")?.takeIf(String::isNotBlank)?.let(sim.gatewayKind()::shortLabel) ?: "网关待确认"
+    val gateway = sim.nullableString("gatewayId")?.takeIf(String::isNotBlank)?.let { sim.gatewayKind().shortLabel(it, sim.nullableString("gatewayName")) } ?: "网关待确认"
     return "$number · $gateway"
 }
 
@@ -553,6 +596,7 @@ internal fun parseCallHistoryItem(call: JSONObject, sim: JSONObject?): CallRepor
         answeredByPlatform = call.nullableString("answeredByPlatform"),
         gatewayKind = call.gatewayKind(),
         originatingPlatform = call.nullableString("originatingPlatform"),
+        ownerJoinedLocal = call.optBoolean("ownerJoinedLocal", false),
         internal = call.optBoolean("internal"),
         peerSimId = call.nullableString("peerSimId"),
         peerSimLabel = call.nullableString("peerSimLabel"),
@@ -629,6 +673,7 @@ internal fun parseCallReport(
                 hasAiTranscript = item.optBoolean("hasAiTranscript"),
                 aiTranscriptUrl = item.nullableString("aiTranscriptUrl").orEmpty(),
                 originatingPlatform = item.nullableString("originatingPlatform"),
+                ownerJoinedLocal = item.optBoolean("ownerJoinedLocal", false),
                 unseen = item.optBoolean("unseen"),
                 internal = item.optBoolean("internal"),
                 peerSimId = item.nullableString("peerSimId"),
@@ -648,7 +693,8 @@ internal fun parseCallTranscript(json: JSONObject): CallTranscript? {
             text = result.getString("text"),
             segments = List(segments.length()) { index -> segments.getJSONObject(index).let { segment ->
                 TranscriptSegment(
-                    OriginalTranscriptTrack.parse(segment.getString("track")),
+                    // S94: an optional `sourceTrack` names the real capture when `track` is a compatibility label.
+                    TranscriptTrack.parse(segment.nullableString("sourceTrack") ?: segment.getString("track")),
                     segment.getString("speaker"),
                     segment.getString("text"),
                     segment.nullableDouble("startMs"),
@@ -657,7 +703,7 @@ internal fun parseCallTranscript(json: JSONObject): CallTranscript? {
             } },
             providers = List(providers.length()) { index -> providers.getJSONObject(index).let { provider ->
                 TranscriptProvider(
-                    OriginalTranscriptTrack.parse(provider.getString("track")),
+                    TranscriptTrack.parse(provider.getString("track")),
                     provider.getString("provider"),
                     provider.nullableString("model"),
                     provider.nullableString("version"),
@@ -795,6 +841,33 @@ private fun parsePixelRecording(value: JSONObject): RecordingManifest {
             ))
         }
     }
+    // S94: `archiveVersion: 4` and exactly one `uplinkTracks` entry come together; the uplink never
+    // counts towards the descriptor's captureComplete.
+    val uplinkArtifacts = if (!value.has("archiveVersion") && !value.has("uplinkTracks")) emptyList() else {
+        require(value.strictSafeInt("archiveVersion") == 4) { "recording archive version invalid" }
+        val uplink = value.getJSONArray("uplinkTracks")
+        require(uplink.length() == 1) { "recording uplink tracks invalid" }
+        val raw = uplink.getJSONObject(0)
+        require(raw.getString("track") == RecordingAudioTrack.CALLER_UPLINK.wireValue &&
+            raw.getString("sourceRole") == "uplink_capture" && raw.getString("mediaType") == "audio/wav") {
+            "recording uplink track identity invalid"
+        }
+        val bytes = raw.strictSafeLong("bytes")
+        require(bytes in 44..MAX_PIXEL_RECORDING_BYTES && raw.getString("sha256").matches(SHA256)) {
+            "recording uplink track metadata invalid"
+        }
+        listOf(RecordingArtifact(
+            track = RecordingAudioTrack.CALLER_UPLINK,
+            mediaType = "audio/wav",
+            bytes = bytes,
+            sha256 = raw.getString("sha256"),
+            captureComplete = raw.strictBoolean("captureComplete"),
+            gapCount = requireCount(raw.strictSafeLong("gapCount")),
+            droppedFrames = requireCount(raw.strictSafeLong("droppedFrames")),
+            sourceRole = "uplink_capture",
+            durationMs = raw.optionalDurationMs(),
+        ))
+    }
     val timeline = value.getJSONObject("timeline")
     require(timeline.getString("mediaType") == "application/x-ndjson") { "recording timeline media type invalid" }
     require(timeline.strictSafeLong("bytes") in 1..MAX_PIXEL_RECORDING_BYTES && timeline.getString("sha256").matches(SHA256)) {
@@ -815,6 +888,7 @@ private fun parsePixelRecording(value: JSONObject): RecordingManifest {
         captureComplete = captureComplete,
         artifacts = artifacts,
         derivedArtifacts = derivedArtifacts,
+        uplinkArtifacts = uplinkArtifacts,
     )
 }
 

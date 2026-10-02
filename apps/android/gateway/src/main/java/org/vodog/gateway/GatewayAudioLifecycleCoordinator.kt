@@ -41,7 +41,13 @@ internal object GatewayActiveAudioSession {
         /** S56: false while an early-media leg waits for ACTIVE; [earlyStartedMs] is its setup start. */
         val armed: AtomicBoolean = AtomicBoolean(true),
         val earlyStartedMs: Long = 0L,
+        /** S94: from [DeviceCallRecord.answeredByAi]; only an AI call is taken over by an owner unmute. */
+        val answeredByAi: Boolean = false,
+        /** S94: the heartbeat API, for the owner-joined report (lives as long as the foreground scope). */
+        val api: GatewayApi? = null,
     ) {
+        /** S94 本机接入: the owner took this call over on the Pixel; never hung up on media failure. */
+        val ownerLocal: Boolean get() = session.isOwnerLocal
         /** S73b: the session's fatal code, for `media.hangup_after_failure`. */
         @Volatile var failureCode: String? = null
     }
@@ -156,8 +162,12 @@ class GatewayAudioLifecycleCoordinator(private val context: Context) {
         val current = GatewayActiveAudioSession.current()
         if (current?.failed?.get() == true) {
             val armed = current.armed.get()
-            stopFailedLeg(armed)
-            if (armed) hangUpAfterMediaFailure(current.deviceCallId, current.serverCallId, current.failureCode ?: "session_failed")
+            // S94: an owner-local call goes on without the leg. Keeping the handoff (as an early leg
+            // does) keeps handoffPrepared, so the heartbeat never withdraws mediaReady mid-call.
+            stopFailedLeg(armed && !current.ownerLocal)
+            if (armed && !current.ownerLocal) {
+                hangUpAfterMediaFailure(current.deviceCallId, current.serverCallId, current.failureCode ?: "session_failed")
+            }
             return@withLock
         }
         val answered = exactActiveCall()
@@ -173,6 +183,9 @@ class GatewayAudioLifecycleCoordinator(private val context: Context) {
             else if (answered != null && current.armed.compareAndSet(false, true)) armEarlySession(current, api)
             return@withLock
         }
+        // S94: a call the owner took over keeps its audio on the phone; Voice has left, so a new leg would
+        // only fail its prebuffer and hang up. A restarted process must not rebuild one either.
+        if (active.ownerJoined) return@withLock
         val early = answered == null
         if (DeviceProtectedAudioHandoffJournal(context).read().phase != AudioHandoffPhase.ACQUIRED) return@withLock
         if (early && !GatewayEarlyMediaAttempt.claim(requireNotNull(active.serverCallId))) return@withLock
@@ -282,10 +295,19 @@ class GatewayAudioLifecycleCoordinator(private val context: Context) {
                 diagCallId = active.serverCallId,
                 carrierAudioCodec = { carrierAudioCodecName(GatewayTelecomCallRegistry.call(active.deviceCallId)) },
                 rejoiner = rejoiner,
+                uplinkSource = {
+                    // S94 e: the uplink AudioRecord needs the InCallService microphone foreground.
+                    if (GatewayInCallAudioBridge.refreshRecordingForeground()) AudioRecordUplinkSource(context, serverCallId)
+                    else null.also {
+                        GatewayDiag.log("media.uplink_capture_failed", mapOf("phase" to "foreground"),
+                            callId = serverCallId, level = "warn")
+                    }
+                },
             )
             val holder = GatewayActiveAudioSession.Holder(
                 requireNotNull(active.serverCallId), active.deviceCallId, requireNotNull(active.creationTimeMillis), ingress, session,
                 armed = AtomicBoolean(!early), earlyStartedMs = setupStartedMs,
+                answeredByAi = active.answeredByAi, api = api,
             )
             holderRef[0] = holder
             ingress.attach(session)
@@ -489,6 +511,81 @@ internal object GatewayEarlyMediaAttempt {
     }
 }
 
+/**
+ * S94 a/b: IO half of an owner joining an AI-answered call on the Pixel. The main thread already set
+ * the session atomic and cleared the mute lease; this persists the takeover, reports it to Control
+ * (same eventId on every retry) and lets the session close its transport once Control settled.
+ */
+internal object GatewayOwnerLocalJoin {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    fun enter(context: Context, holder: GatewayActiveAudioSession.Holder) {
+        val appContext = context.applicationContext
+        scope.launch {
+            runCatching { DeviceCallJournal(appContext).markOwnerJoined(holder.deviceCallId) }
+            GatewayDiag.log("call.owner_joined_local", mapOf("deviceCallId" to holder.deviceCallId), callId = holder.serverCallId)
+            val settled = java.util.concurrent.CompletableFuture<String>()
+            val api = holder.api
+            val generation = runCatching { GatewayRuntimeStore(appContext).deviceEpoch }.getOrDefault(0L)
+            if (api == null || generation <= 0) settled.complete("no_api")
+            else launch { report(api, holder, generation, settled) }
+            runCatching { holder.session.enterOwnerLocal(settled) }
+        }
+    }
+
+    private suspend fun report(
+        api: GatewayApi,
+        holder: GatewayActiveAudioSession.Holder,
+        generation: Long,
+        settled: java.util.concurrent.CompletableFuture<String>,
+    ) {
+        val eventId = java.util.UUID.randomUUID().toString()
+        var backoffMs = 500L
+        var attempts = 0
+        try {
+            while (true) {
+                attempts++
+                val outcome = ownerJoinedOutcome {
+                    withContext(Dispatchers.IO) {
+                        api.reportOwnerJoined(holder.serverCallId, eventId, generation, holder.deviceCallId, holder.creationTimeMillis)
+                    }
+                }
+                val callLive = GatewayTelecomCallRegistry.snapshot(holder.deviceCallId)?.state
+                    .let { it == ActualTelecomState.ACTIVE || it == ActualTelecomState.HOLDING }
+                val final = outcome ?: if (callLive) null else "call_ended"
+                if (final != null) {
+                    settled.complete(final)
+                    GatewayDiag.log("call.owner_joined_reported", mapOf("result" to final, "attempts" to attempts),
+                        callId = holder.serverCallId, level = if (final == "ok") "info" else "warn")
+                    return
+                }
+                kotlinx.coroutines.delay(backoffMs)
+                backoffMs = minOf(backoffMs * 2, 10_000L)
+            }
+        } finally { settled.complete("cancelled") }
+    }
+}
+
+/**
+ * S94 b: one owner-joined attempt → its settled outcome, or null to retry with the same eventId.
+ * 2xx = done; any 409 (CALL_NOT_ACTIVE, EVENT_ID_REUSED, fence) = stop; 5xx / network = retry.
+ */
+internal suspend fun ownerJoinedOutcome(attempt: suspend () -> Unit): String? = try {
+    attempt(); "ok"
+} catch (cancelled: kotlinx.coroutines.CancellationException) {
+    throw cancelled
+} catch (error: GatewayApiHttpError) {
+    when {
+        error.status == 409 -> "conflict:${error.code ?: "409"}"
+        error.status >= 500 -> null
+        else -> "rejected:${error.status}"
+    }
+} catch (_: java.io.IOException) {
+    null
+} catch (error: Exception) {
+    "stopped:${error.javaClass.simpleName}"
+}
+
 /** Cleanup scope is process-owned and is never cancelled with the foreground heartbeat scope. */
 internal object GatewayAudioLifecycleCleanup {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -526,7 +623,7 @@ internal fun needsRemoteMedia(record: DeviceCallRecord): Boolean = !record.devic
 
 /** S73b: only a live, armed remote-media call is hung up when its media leg fails for good. */
 internal fun shouldHangUpAfterMediaFailure(record: DeviceCallRecord?, armed: Boolean, actual: ActualTelecomState?): Boolean =
-    armed && record != null && needsRemoteMedia(record) && record.state != DeviceCallState.ENDED &&
+    armed && record != null && needsRemoteMedia(record) && !record.ownerJoined && record.state != DeviceCallState.ENDED &&
         actual in setOf(ActualTelecomState.DIALING, ActualTelecomState.CONNECTING, ActualTelecomState.ACTIVE, ActualTelecomState.HOLDING)
 
 internal fun isExactNonTerminalCall(record: DeviceCallRecord, actual: ActualTelecomState?): Boolean =

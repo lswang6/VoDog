@@ -261,12 +261,40 @@ internal fun smsSubtitle(item: JSONObject, simLabel: String): String {
     ).filter { it.isNotBlank() }.joinToString(" · ")
 }
 
-/** Conversation-row caption: 收到/发出 · SIM · 投递状态. */
+/**
+ * Conversation-row caption: 收到/发出 · SIM · 投递状态. S92: an incoming message that arrived normally
+ * already says 收到, so 「已收到」 is not repeated; anomalous incoming states still show.
+ */
 internal fun smsRowCaption(message: ClientSmsMessage, simLabel: String): String = listOf(
     if (message.direction == "incoming") "收到" else "发出",
     simLabel,
-    smsStateLabel(message),
+    if (message.direction == "incoming" && message.state in setOf("delivered", "received")) "" else smsStateLabel(message),
 ).filter(String::isNotBlank).joinToString(" · ")
+
+/**
+ * S92: Pixel font sizes are 1.0 / 1.15 / 1.3 / 1.5 / 1.8 / 2.0. From 1.5 the three side-by-side
+ * detail buttons, the 84 dp fact-label column and the 记录 segmented labels no longer fit.
+ */
+internal fun isLargeFontScale(fontScale: Float): Boolean = fontScale > 1.3f
+
+/**
+ * S92: dial-key diameter (dp). Grows with the font so digit + letters stay inside the key; capped so
+ * three keys per row still fit a 411 dp screen inside the dial card (≈103 dp per cell).
+ */
+internal fun keypadKeySizeDp(fontScale: Float): Float = 68f * fontScale.coerceIn(1f, 1.45f)
+
+/**
+ * S92: the character range of the phone number inside a `号码 · 姓名` / `姓名 · 号码` title, or null.
+ * Only that range is monospaced — a monospaced name and separator read as 「10010  ·  联通服务」.
+ */
+internal fun phoneTitleNumberRange(title: String): IntRange? {
+    var start = 0
+    for (segment in title.split(" · ")) {
+        if (segment.isNotBlank() && segment.all { it.isDigit() || it in "+*#()- " }) return start until start + segment.length
+        start += segment.length + 3
+    }
+    return null
+}
 
 internal fun fileSizeLabel(bytes: Long): String = when {
     bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))

@@ -2,7 +2,12 @@ package org.vodog
 
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -13,6 +18,8 @@ import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.animateTo
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,21 +85,31 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.isOutOfBounds
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -596,6 +613,9 @@ internal fun SmsConversationPage(
     val scope = rememberCoroutineScope()
     // S83：「选择文字」弹窗正在展示的短信正文；null 表示没开。
     var selectingTextOf by remember { mutableStateOf<String?>(null) }
+    // S87：点了正文里的链接、等待确认的规范化 URL；null 表示没开确认框。
+    var pendingUrl by remember(conversation.key.storageKey) { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
     val latest = conversation.latest
     val draftKey = replySmsDraftKey(account, conversation.key)
     val body = state.smsDrafts[draftKey].orEmpty()
@@ -673,6 +693,25 @@ internal fun SmsConversationPage(
             },
         )
     }
+    pendingUrl?.let { url ->
+        AlertDialog(
+            onDismissRequest = { pendingUrl = null },
+            modifier = Modifier.testTag("conversation.link.dialog"),
+            title = { Text("打开链接？") },
+            text = { Text(url) },
+            confirmButton = {
+                TextButton(
+                    onClick = { pendingUrl = null; openSmsLink(context, url) },
+                    modifier = Modifier.heightIn(min = TouchTarget).testTag("conversation.link.open"),
+                ) { Text("打开") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingUrl = null }, modifier = Modifier.heightIn(min = TouchTarget)) {
+                    Text("取消")
+                }
+            },
+        )
+    }
     Column(Modifier.fillMaxSize().imePadding().pointerInput(Unit) {
         detectTapGestures { focus.clearFocus(); keyboard?.hide() }
     }) {
@@ -718,10 +757,9 @@ internal fun SmsConversationPage(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回短信", tint = MaterialTheme.colorScheme.primary)
             }
             Text(
-                conversation.title,
+                phoneNumberTitle(conversation.title),
                 modifier = Modifier.padding(horizontal = 64.dp),
                 style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -790,10 +828,11 @@ internal fun SmsConversationPage(
                             contentColor = if (outgoing) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                             shape = MaterialTheme.shapes.large,
                         ) {
-                            Text(
+                            SmsBubbleBody(
                                 message.body.ifBlank { "（空短信）" },
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                                style = MaterialTheme.typography.bodyLarge,
+                                linkable = !selecting,
+                                onOpenLink = { pendingUrl = it },
+                                onLongPressLink = { menuOpen = true },
                             )
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -880,5 +919,85 @@ internal fun SmsConversationPage(
                 }
             }
         }
+    }
+}
+
+/**
+ * S87：气泡正文。选择模式或没有链接时与原来的纯文本完全一致；有链接时链接段加下划线（颜色继承气泡
+ * 正文色），点按只把 URL 交给确认框，绝不直接打开。
+ *
+ * 每个链接段在 BasicText 里自带一个没有长按的 combinedClickable，它会在 Main pass 吃掉按下事件，外层
+ * 气泡的长按就收不到了，按住再松手反而触发链接。所以这里在 Initial pass 先看一眼：按在链接上且按满
+ * 长按时长，就自己弹 S83 菜单，并吃掉后续事件，让链接的点按随之取消。
+ */
+@Composable
+private fun SmsBubbleBody(text: String, linkable: Boolean, onOpenLink: (String) -> Unit, onLongPressLink: () -> Unit) {
+    val modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
+    val style = MaterialTheme.typography.bodyLarge
+    val links = remember(text) { SmsLinkPolicy.detect(text) }
+    if (!linkable || links.isEmpty()) {
+        Text(text, modifier = modifier, style = style)
+        return
+    }
+    val haptic = LocalHapticFeedback.current
+    val longPress by rememberUpdatedState(onLongPressLink)
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val linkStyles = TextLinkStyles(SpanStyle(textDecoration = TextDecoration.Underline))
+    val annotated = buildAnnotatedString {
+        append(text)
+        links.forEach { link ->
+            addLink(LinkAnnotation.Clickable(link.url, linkStyles) { onOpenLink(link.url) }, link.start, link.end)
+        }
+    }
+    Text(
+        annotated,
+        modifier = modifier.pointerInput(links) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                // ponytail: 按字符偏移判定，链接自身的点按区按字形裁剪，边缘一条细缝两者可能不一致（最坏是
+                // 双重震动或退回原生行为）；要更准就改用 layout.getPathForRange 做命中。
+                val offset = layout?.getOffsetForPosition(down.position) ?: return@awaitEachGesture
+                if (links.none { offset >= it.start && offset < it.end }) return@awaitEachGesture
+                // true = 松手（交给链接当点按），false = 滑动 / 取消，null = 按满长按时长。在 Final pass 看，
+                // 这样列表滚动已经消费过事件：文字跟着手指走、位置不出界，只能靠「被消费」认出滚动。
+                // 第一次拿到的是同一个按下事件的 Final pass，链接的 clickable 已经消费了它，不能算取消。
+                val released = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                    var result: Boolean? = null
+                    while (result == null) {
+                        val event = awaitPointerEvent(PointerEventPass.Final)
+                        result = when {
+                            event.changes.all { !it.pressed } -> true
+                            event.changes.any {
+                                (it.isConsumed && !it.changedToDownIgnoreConsumed()) || it.isOutOfBounds(size, extendedTouchPadding) ||
+                                    (it.position - down.position).getDistance() > viewConfiguration.touchSlop
+                            } -> false
+                            else -> null
+                        }
+                    }
+                    result
+                }
+                if (released != null) return@awaitEachGesture
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                longPress()
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    event.changes.forEach { it.consume() }
+                } while (event.changes.any { it.pressed })
+            }
+        },
+        style = style,
+        onTextLayout = { layout = it },
+    )
+}
+
+/** S87：确认后才走到这里；短信正文不可信，解析后再校验一次 scheme。 */
+private fun openSmsLink(context: Context, url: String) {
+    // 意图过滤器按小写比对 scheme，`HTTP://…` 不规范化会找不到浏览器。
+    val uri = Uri.parse(url).normalizeScheme()
+    if (!SmsLinkPolicy.isOpenable(url) || uri.scheme?.lowercase() !in setOf("http", "https")) return
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "没有可打开链接的应用", Toast.LENGTH_SHORT).show()
     }
 }

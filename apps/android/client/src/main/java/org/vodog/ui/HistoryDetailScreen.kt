@@ -33,8 +33,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
@@ -71,7 +71,7 @@ internal fun HistoryDetailPage(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回记录")
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(callTitle(call), style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Monospace)
+                    Text(phoneNumberTitle(callTitle(call)), style = MaterialTheme.typography.titleLarge)
                     Text(
                         listOf(item.sim.label, directionLabel(item.direction), callStateLabel(call.optString("state")))
                             .joinToString(" · "),
@@ -196,11 +196,15 @@ internal fun CallDetailActionRow(
     onInfo: () -> Unit,
 ) {
     val dialable = dialableNumber(number)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    // S92: at large font scales three side-by-side buttons wrapped one character per line; stack them
+    // as full-width rows instead. Default scales keep the original row.
+    val stacked = isLargeFontScale(LocalDensity.current.fontScale)
+    val buttonModifier = if (stacked) Modifier.fillMaxWidth() else Modifier
+    val buttons: @Composable (Modifier) -> Unit = { slot ->
         FilledTonalButton(
             onClick = onDial,
             enabled = LocalNetworkAvailable.current && dialable,
-            modifier = Modifier.weight(1f).heightIn(min = 52.dp).testTag("history.detail.dial"),
+            modifier = slot.then(buttonModifier).heightIn(min = 52.dp).testTag("history.detail.dial"),
         ) {
             Icon(Icons.Filled.Call, null)
             Spacer(Modifier.width(6.dp))
@@ -209,7 +213,7 @@ internal fun CallDetailActionRow(
         FilledTonalButton(
             onClick = onSms,
             enabled = dialable,
-            modifier = Modifier.weight(1f).heightIn(min = 52.dp).testTag("history.detail.smsDraft"),
+            modifier = slot.then(buttonModifier).heightIn(min = 52.dp).testTag("history.detail.smsDraft"),
         ) {
             Icon(Icons.AutoMirrored.Filled.Message, null)
             Spacer(Modifier.width(6.dp))
@@ -217,17 +221,31 @@ internal fun CallDetailActionRow(
         }
         OutlinedButton(
             onClick = onInfo,
-            modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+            modifier = slot.then(buttonModifier).heightIn(min = 52.dp),
         ) {
             Icon(Icons.Outlined.Info, null)
             Spacer(Modifier.width(6.dp))
             Text("信息")
         }
     }
+    if (stacked) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) { buttons(Modifier) }
+    } else {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) { buttons(Modifier.weight(1f)) }
+    }
 }
 
 @Composable
 private fun DetailFact(label: String, value: String) {
+    // S92: the 84 dp label column wrapped 号码线路 / 通话时长 at large font scales; there the label
+    // sits above its value instead.
+    if (isLargeFontScale(LocalDensity.current.fontScale)) {
+        Column(Modifier.fillMaxWidth()) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyMedium)
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Text(
             label,

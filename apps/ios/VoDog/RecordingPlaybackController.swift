@@ -10,6 +10,7 @@ final class RecordingPlaybackController {
     enum TogetherMode: Equatable {
         case originals
         case compensated
+        case ownerJoined
     }
 
     enum State: Equatable {
@@ -166,7 +167,11 @@ final class RecordingPlaybackController {
         let paths = Set(artifacts.map(\.path))
         let originalPair = Set([RecordingTrack.remoteOriginal.rawValue, RecordingTrack.callerOriginal.rawValue])
         let compensatedPair = Set([RecordingTrack.remoteOriginal.rawValue, "caller_playout"])
-        let expectedPair = mode == .originals ? originalPair : compensatedPair
+        let expectedPair = switch mode {
+        case .originals: originalPair
+        case .compensated: compensatedPair
+        case .ownerJoined: Set([RecordingTrack.remoteOriginal.rawValue, "caller_uplink"])
+        }
         guard artifacts.count == 2, paths == expectedPair,
               artifacts.allSatisfy({ $0.bytes > 0 }) else {
             state = .failedTogether(mode, "双方声轨尚未齐全，请分别播放可用原声")

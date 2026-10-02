@@ -392,9 +392,9 @@ CREATE TABLE IF NOT EXISTS pixel_recording_upload_objects (
   PRIMARY KEY(archive_id,object_name)
 );
 
--- Upgrade existing v2 installations before accepting v3 derived playout objects.
+-- Upgrade existing v2 installations before accepting v3 derived playout objects; S94 adds the v4 owner uplink.
 ALTER TABLE pixel_recording_upload_objects DROP CONSTRAINT IF EXISTS pixel_recording_upload_objects_object_name_check;
-ALTER TABLE pixel_recording_upload_objects ADD CONSTRAINT pixel_recording_upload_objects_object_name_check CHECK(object_name IN ('remote_original.wav.gz','caller_original.wav.gz','timeline.jsonl.gz','caller_playout.wav.gz'));
+ALTER TABLE pixel_recording_upload_objects ADD CONSTRAINT pixel_recording_upload_objects_object_name_check CHECK(object_name IN ('remote_original.wav.gz','caller_original.wav.gz','timeline.jsonl.gz','caller_playout.wav.gz','caller_uplink.wav.gz'));
 
 -- S31 deletion evidence is intentionally content-free. BEFORE DELETE triggers cover both the UI
 -- routes and infra/retention.py's direct SQL in the same transaction as the destructive operation.
@@ -768,3 +768,7 @@ CREATE INDEX IF NOT EXISTS device_events_resource_idx ON device_events(resource_
 -- rows created afterwards start NULL. DROP DEFAULT is idempotent on every boot.
 ALTER TABLE commands ADD COLUMN IF NOT EXISTS delivered_at timestamptz DEFAULT now();
 ALTER TABLE commands ALTER COLUMN delivered_at DROP DEFAULT;
+-- S93 refresh grace: the refresh token a rotation replaced stays redeemable until the new access
+-- token is first used, so a native app killed before saving the new pair is not logged out.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS previous_refresh_hash text;
+CREATE INDEX IF NOT EXISTS sessions_previous_refresh_hash ON sessions(previous_refresh_hash) WHERE previous_refresh_hash IS NOT NULL;

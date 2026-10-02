@@ -397,10 +397,12 @@ export class DoubaoVoiceAgent extends EventEmitter {
       this.responseGeneration = this.outputGeneration;
       this.responseActive = true;
       // 开场白是客户端文本合成（tts_type=chat_tts_text），服务端不会给它发 output_text.done；
-      // 通话记录里没有 AI 的第一句话很奇怪，这里补一条助手终稿，按同一个 responseId 随 completed 落库。
+      // 通话记录里没有 AI 的第一句话很奇怪，这里补一条助手终稿。它带 `immediate`，在开始播放这一刻直接落库：
+      // 线上 output_audio.done 带回的 id 与这里的 key 对不上（run 5ff14059），按 responseId 等 completed
+      // 会让开场白一直挂到收尾才落库，排在来电者之后。
       if (event.tts_type === 'chat_tts_text' && this.greeted && !this.greetingLogged) {
         this.greetingLogged = true;
-        this.emit('transcript', { text: this.greeting.slice(0, MAX_TEXT), final: true, responseId });
+        this.emit('transcript', { text: this.greeting.slice(0, MAX_TEXT), final: true, responseId, immediate: true });
       }
       // 每轮重置重采样器：上一轮被打断后残留在 FIR 历史里的尾巴不该渗进下一句。
       this.resampler = new Pcm24kTo16kResampler();

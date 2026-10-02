@@ -15,6 +15,7 @@ import {OutboundAttempt} from './outbound-attempt';
 import {gatewayShortLabel,gatewayTag} from './gateway-kind';
 import {CallAttemptScope,claimedByThisSession,claimWithReconciliation,CurrentSessionCallEnd,sendDtmfDigit} from './call-lifecycle';
 import {diag,fetchErrorType} from './diag';
+import {loadAllSms,type SmsPage} from './sms-pages';
 import {useReportedError,flashConfirmation} from './ui-error';
 import {WebCallLiveness,type CallLivenessAPI,type CallLivenessSnapshot} from './call-liveness';
 import {DashboardRefreshCoordinator,dashboardRefreshIntervalMs,IDLE_DASHBOARD_REFRESH_MS} from './dashboard-refresh';
@@ -37,6 +38,7 @@ import {VoiceProviderPanel} from './voice-provider-panel';
 import {InterceptionsPanel} from './interceptions-panel';
 import {AI_TRANSCRIPT_LABELS,CallHistoryPanel,CallList,Empty,aiAnsweredCall,labels,type Call,type Sim} from './call-history-panel';
 import {CallRecording} from './recording';
+import {preferPixelSource} from './recording-contract';
 import {clientPage} from './pager';
 import {isBlockedRow,numberWithContact,type ContactDto} from './contacts';
 import type {InterceptionRow} from './interceptions';
@@ -90,7 +92,7 @@ export function SimSelector({sims,selectedId,status,busy,onSelect,onRetry,allLab
  return <>
   <section className="sim-bar" aria-label="选择 SIM">
    {allLabel&&sims.length>0&&<button className={selectedId===''?'selected':''} onClick={e=>{onSelect('');e.currentTarget.scrollIntoView({block:'nearest',inline:'center'});}}><strong>{allLabel}</strong><span>显示所有号码的记录</span></button>}
-   {sims.length?sims.map(s=>{const c=simPaletteColor(s,sims);return <button className={selectedId===s.id?'selected':''} key={s.id} style={{'--sim-light':c.light,'--sim-dark':c.dark} as React.CSSProperties} onClick={e=>{onSelect(s.id);e.currentTarget.scrollIntoView({block:'nearest',inline:'center'});}}>{badgeCount&&<UnreadBadge count={badgeCount(s.id)}/>}<span className={`sim-dot ${s.present!==false&&s.online?'online':'offline'}`} aria-hidden="true"/><strong>{s.label||'未命名号码'}</strong>{(b=>b&&<span className="sim-mode-badge" aria-label={`接听方式：${b}`}>{b}</span>)(simAnswerModeBadge(s.settings))}<span>{s.phoneLabel||'未标注号码'}</span><small>{s.present===false?'未待机':s.online?'在线':'离线'}</small><span className="gateway-source" title={gatewayTag(s.gatewayId,s.gatewayKind)}>{gatewayShortLabel(s.gatewayId,s.gatewayKind)}</span></button>;}):status==='loading'?<div className="empty-sim"><strong>正在读取 SIM…</strong><span>正在确认当前账号的 SIM 分配。</span></div>:status==='error'?<div className="empty-sim"><strong>SIM 信息暂不可用</strong><span>暂时无法确认当前账号的 SIM 分配。</span></div>:<div className="empty-sim"><strong>还没有分配的 SIM</strong><span>在网关设备上配对，并将 SIM 分配到此账号。</span></div>}
+   {sims.length?sims.map(s=>{const c=simPaletteColor(s,sims);return <button className={selectedId===s.id?'selected':''} key={s.id} style={{'--sim-light':c.light,'--sim-dark':c.dark} as React.CSSProperties} onClick={e=>{onSelect(s.id);e.currentTarget.scrollIntoView({block:'nearest',inline:'center'});}}>{badgeCount&&<UnreadBadge count={badgeCount(s.id)}/>}<span className={`sim-dot ${s.present!==false&&s.online?'online':'offline'}`} aria-hidden="true"/><strong>{s.label||'未命名号码'}</strong>{(b=>b&&<span className="sim-mode-badge" aria-label={`接听方式：${b}`}>{b}</span>)(simAnswerModeBadge(s.settings))}<span>{s.phoneLabel||'未标注号码'}</span><small>{s.present===false?'未待机':s.online?'在线':'离线'}</small><span className="gateway-source" title={gatewayTag(s.gatewayId,s.gatewayKind)}>{gatewayShortLabel(s.gatewayId,s.gatewayKind,s.gatewayName)}</span></button>;}):status==='loading'?<div className="empty-sim"><strong>正在读取 SIM…</strong><span>正在确认当前账号的 SIM 分配。</span></div>:status==='error'?<div className="empty-sim"><strong>SIM 信息暂不可用</strong><span>暂时无法确认当前账号的 SIM 分配。</span></div>:<div className="empty-sim"><strong>还没有分配的 SIM</strong><span>在网关设备上配对，并将 SIM 分配到此账号。</span></div>}
   </section>
   {status==='error'&&<div className="error sim-load-error" role="alert"><p>{sims.length?'SIM 刷新失败，已保留上次读取的号码。':'暂时无法读取 SIM 信息，请重试。'}</p><button type="button" className="passkey" disabled={busy} onClick={onRetry}>重试读取 SIM</button></div>}
  </>;
@@ -139,7 +141,7 @@ const [contactEditRequest,setContactEditRequest]=useState<{contact:ContactDto;to
  if(!callAttempts.current)callAttempts.current=new CallAttemptScope(sessionStorage);
  if(!dashboardRefresh.current)dashboardRefresh.current=new DashboardRefreshCoordinator({
   epoch:()=>authEpoch.current,
-  loadSims:async()=>{const epoch=authEpoch.current;try{return await api<{items:Sim[]}>('/sims');}catch(cause){throw new SimRefreshFailure(epoch,cause);}},loadCalls:()=>api<{items:Call[]}>('/calls?includeBlocked=true'),loadMessages:()=>api<{items:Sms[]}>('/sms'),
+  loadSims:async()=>{const epoch=authEpoch.current;try{return await api<{items:Sim[]}>('/sims');}catch(cause){throw new SimRefreshFailure(epoch,cause);}},loadCalls:()=>api<{items:Call[]}>('/calls?includeBlocked=true'),loadMessages:()=>loadAllSms<Sms>(path=>api<SmsPage<Sms>>(path),(pages,items)=>diag.log('sms.page_cap',{pages,items})),
   applySims:s=>{simsObservation.current++;setSims(s.items);setSimLoadStatus('ready');setSimId(old=>s.items.some(x=>x.id===old)?old:s.items[0]?.id||'');setRecordsSimId(old=>!old||s.items.some(x=>x.id===old)?old:'');},
   applyCalls:c=>setCalls(c.items),applyMessages:m=>setMessages(m.items),
  });
@@ -368,7 +370,7 @@ const [contactEditRequest,setContactEditRequest]=useState<{contact:ContactDto;to
   onSms={target=>{const dest=normalizedDialNumber(target.remoteNumber||'');const line=target.simId||simId;if(!dest||!line)return;setCardTarget(null);setSimId(line);const fromContacts=liveCardTarget?.contact;if(fromContacts){setSmsCompose({simId:line,remoteNumber:dest,contactName:fromContacts.displayName||null,token:Date.now()});setTab('通讯录');}else{setSmsModal({remoteNumber:dest,contactName:target.contactName||null,token:Date.now()});}}}
   onCreateContact={remoteNumber=>{setCardTarget(null);setContactDraftRequest({remoteNumber,token:Date.now()});setTab('通讯录');}}
   onEdit={contact=>{setCardTarget(null);setContactEditRequest({contact,token:Date.now()});setTab('通讯录');}}
-  media={mediaCall&&<><div className="record-media-actions" role="group" aria-label="录音与转录"><CallRecording callId={mediaCall.id} timeZone={gatewayDisplayTimeZone(mediaCall.gatewayTimeZone,mediaSim?.timeZone)} request={api} preferPixelSource={mediaCall.originatingPlatform==='pixel'} gatewayKind={mediaCall.gatewayKind??mediaSim?.gatewayKind}/><CallTranscript callId={mediaCall.id} request={api}/>{aiAnsweredCall(mediaCall)&&<AiTranscriptToggle callId={mediaCall.id} request={api} labels={AI_TRANSCRIPT_LABELS}/>}</div></>} onChanged={cardChanged}/>}
+  media={mediaCall&&<><div className="record-media-actions" role="group" aria-label="录音与转录"><CallRecording callId={mediaCall.id} timeZone={gatewayDisplayTimeZone(mediaCall.gatewayTimeZone,mediaSim?.timeZone)} request={api} preferPixelSource={preferPixelSource(mediaCall)} ownerJoinedLocal={mediaCall.ownerJoinedLocal} gatewayKind={mediaCall.gatewayKind??mediaSim?.gatewayKind}/><CallTranscript callId={mediaCall.id} request={api}/>{aiAnsweredCall(mediaCall)&&<AiTranscriptToggle callId={mediaCall.id} request={api} labels={AI_TRANSCRIPT_LABELS}/>}</div></>} onChanged={cardChanged}/>}
  {smsModal&&<div className="modal-backdrop sms-modal" onPointerDown={event=>{if(event.target===event.currentTarget)setSmsModal(null);}}><SmsCompose request={api} account={user.username} onSent={async()=>{try{await refresh();}catch{setConnectionError('短信已受理，记录暂未刷新，正在自动重试。');}}} requestToken={smsModal.token} messages={messages} simId={simId} simLabel={selected?.phoneLabel||selected?.label||'当前号码'} online={Boolean(selected?.online&&selected.present!==false&&selected.smsReady===true)} busy={busy} timeZone={selected?.timeZone} remoteNumber={smsModal.remoteNumber} contactName={smsModal.contactName} onSend={sendSms} onClose={()=>setSmsModal(null)}/></div>}
  </main></div>;
 }

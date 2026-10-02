@@ -8,6 +8,7 @@ import {flashConfirmation} from './ui-error.ts';
 import {startSmsRecipients,type SmsRecipient} from './sms-recipient-policy';
 import {enqueueSmsBatch} from './sms-send';
 import {ConfirmAction} from './confirm-action';
+import {isOpenableUrl,smsLinkSegments} from './sms-links';
 import {CONVERSATION_DELETE_AND_BLOCK_PROMPT,CONVERSATION_DELETE_PROMPT,MESSAGES_DELETE_CONFIRM_LABEL,MESSAGES_DELETE_PROMPT} from './confirm-copy';
 import {threadHasUnread} from './badges';
 import {diag} from './diag';
@@ -122,7 +123,7 @@ function MessagesBody({request,account,onSent,messages,simId,simLabel,online,bus
     const chosen=selectedIds.has(m.id);
     // In selection mode the whole bubble is the hit target; the box only mirrors it, so one tap never toggles twice.
     const selectable=selecting?{role:'checkbox','aria-checked':chosen,tabIndex:0,onClick:()=>toggleMessage(m.id),onKeyDown:(event:React.KeyboardEvent)=>{if(event.key===' '||event.key==='Enter'){event.preventDefault();toggleMessage(m.id);}}}:{};
-    return <article className={'message-bubble '+(m.direction==='outgoing'?'outgoing':'incoming')+(chosen&&selecting?' selected':'')} key={m.id} {...selectable}>{selecting&&<input type="checkbox" className="message-select" checked={chosen} readOnly tabIndex={-1} aria-hidden="true"/>}<p>{m.body}</p><small>{formatCompactCallDate(m.createdAt,zone)} · {smsStatusLabel(m)}</small></article>;
+    return <article className={'message-bubble '+(m.direction==='outgoing'?'outgoing':'incoming')+(chosen&&selecting?' selected':'')} key={m.id} {...selectable}>{selecting&&<input type="checkbox" className="message-select" checked={chosen} readOnly tabIndex={-1} aria-hidden="true"/>}<SmsBody body={m.body} plain={selecting}/><small>{formatCompactCallDate(m.createdAt,zone)} · {smsStatusLabel(m)}</small></article>;
    })}<div ref={bottom}/></div>
    <form className="message-composer" onSubmit={e=>{
     e.preventDefault();
@@ -146,6 +147,20 @@ function MessagesBody({request,account,onSent,messages,simId,simLabel,online,bus
    </form>{!canReply&&<p className="note">此发送方不支持直接回复。</p>}{!online&&<p className="note">此号码暂不可用，草稿已保留。</p>}
   </>}</div>
  </section>;
+}
+
+/** S87: bubble text with tappable links; `plain` (selection mode) keeps the bubble a pure checkbox target. */
+function SmsBody({body,plain=false}:{body:string;plain?:boolean}){
+ const [pending,setPending]=useState<string|null>(null);
+ if(plain&&pending)setPending(null);
+ const segments=plain?[]:smsLinkSegments(body);
+ if(!segments.some(s=>s.url))return <p>{body}</p>;
+ return <>
+  <p>{segments.map((s,i)=>s.url?<a key={i} className="sms-link" href={s.url} target="_blank" rel="noopener noreferrer" onClick={event=>{event.preventDefault();setPending(s.url!);}}>{s.text}</a>:s.text)}</p>
+  {pending&&<ConfirmAction busy={false} prompt="打开链接？" detail={pending} confirmLabel="打开" tone="neutral"
+   onConfirm={()=>{const url=pending;setPending(null);if(isOpenableUrl(url))window.open(url,'_blank','noopener,noreferrer');}}
+   onCancel={()=>setPending(null)}/>}
+ </>;
 }
 
 /**
@@ -233,7 +248,7 @@ function SmsComposeBody({request,account,onSent,messages,simId,simLabel,online,b
     <SmsRecipients key={`${remoteNumber}:${requestToken||0}`} value={recipients} onChange={setRecipients} onPendingChange={setPendingRecipient} request={request} busy={busy}/>
     {sendNotice&&<p className="note" role="status">{sendNotice}</p>}
     <div className="message-bubbles" aria-live="polite">
-      {(thread?.messages||[]).map(m=><article className={'message-bubble '+(m.direction==='outgoing'?'outgoing':'incoming')} key={m.id}><p>{m.body}</p><small>{formatCompactCallDate(m.createdAt,zone)} · {smsStatusLabel(m)}</small></article>)}
+      {(thread?.messages||[]).map(m=><article className={'message-bubble '+(m.direction==='outgoing'?'outgoing':'incoming')} key={m.id}><SmsBody body={m.body}/><small>{formatCompactCallDate(m.createdAt,zone)} · {smsStatusLabel(m)}</small></article>)}
       {(!thread||!thread.messages.length)&&<p className="sms-compose-empty">还没有聊天记录</p>}
       <div ref={bottom}/>
     </div>

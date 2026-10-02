@@ -61,6 +61,7 @@ struct RecordsView: View {
         let kind: Kind
         let timeZone: String?
         var originatingPlatform: String? = nil
+        var ownerJoinedLocal = false
         /// S58: 报告卡打开录音时也按网关类型标注设备归档（DJI 4G 而非 Pixel）。
         var gatewayKind: String? = nil
         var id: String { "\(callID)\u{001f}\(kind)" }
@@ -189,7 +190,8 @@ struct RecordsView: View {
                     case .recording:
                         RecordingRecordView(callID: target.callID, gatewayTimeZone: target.timeZone,
                                             gatewayKind: target.gatewayKind,
-                                            originatingPlatform: target.originatingPlatform)
+                                            originatingPlatform: target.originatingPlatform,
+                                            ownerJoinedLocal: target.ownerJoinedLocal)
                     case .aiConversation:
                         AiConversationRecordView(callID: target.callID, gatewayTimeZone: target.timeZone)
                     }
@@ -215,7 +217,9 @@ struct RecordsView: View {
 
     private var callList: some View {
         List {
-            if let callsSnapshotCaption {
+            if let callsSnapshotCaption, RecordSearchPolicy.showsSnapshotCaption(
+                query: callQuery, page: callsPaging.page, stale: callsError != nil || !availability.canMutate
+            ) {
                 Text(callsSnapshotCaption).font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -285,6 +289,7 @@ struct RecordsView: View {
 ///
 /// Its own view so the paged list can be previewed without a session.
 struct CallHistoryRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let call: CallRecord
     var sims: [SIMChannel] = []
 
@@ -312,13 +317,20 @@ struct CallHistoryRow: View {
                 if let line = callLineTitle(call.simId, in: sims) {
                     Text(line).font(.caption).foregroundStyle(.secondary)
                 }
+                // Accessibility sizes: the state moves under the text instead of squeezing it.
+                if dynamicTypeSize.isAccessibilitySize { stateText }
             }
-            Spacer(); Text(call.rowStateTitle).font(.caption).foregroundStyle(call.isMissedIncoming ? .red : .secondary)
+            Spacer()
+            if !dynamicTypeSize.isAccessibilitySize { stateText }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(unseen ? "未查看，" : "")\(call.showsBlockedMark ? "已屏蔽，" : "")\(ContactDisplay.numberWithName(number: call.shownNumber(in: sims), contactName: call.shownContactName))，\(call.rowStateTitle)\(call.s38BadgeTitle.map { "，\($0)" } ?? "")\(callLineTitle(call.simId, in: sims).map { "，\($0)" } ?? "")"
         )
+    }
+
+    private var stateText: some View {
+        Text(call.rowStateTitle).font(.caption).foregroundStyle(call.isMissedIncoming ? .red : .secondary)
     }
 }
 
@@ -363,7 +375,9 @@ extension RecordsView {
     private var reportList: some View {
         List {
             Section { dateControl.disabled(!availability.canMutate) }
-            if let reportSnapshotCaption {
+            if let reportSnapshotCaption, RecordSearchPolicy.showsSnapshotCaption(
+                query: reportQuery, page: reportPaging.page, stale: reportError != nil || !availability.canMutate
+            ) {
                 Text(reportSnapshotCaption).font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -570,7 +584,8 @@ extension RecordsView {
             Button {
                 markReportSeen(item)
                 sheetTarget = RecordSheet(callID: item.callId, kind: .recording, timeZone: item.gatewayTimeZone,
-                                          originatingPlatform: item.originatingPlatform, gatewayKind: item.gatewayKind)
+                                          originatingPlatform: item.originatingPlatform,
+                                          ownerJoinedLocal: item.ownerJoinedLocal, gatewayKind: item.gatewayKind)
             } label: {
                 Text("查看录音").frame(minHeight: 44).contentShape(Rectangle())
             }
@@ -1080,7 +1095,8 @@ struct RecordDetailView: View {
         .sheet(isPresented: $showingRecording, onDismiss: { RecordingPlaybackController.shared.stop() }) {
             NavigationStack {
                 RecordingRecordView(callID: callID, gatewayTimeZone: call?.gatewayTimeZone, gatewayKind: call?.gatewayKind,
-                                    originatingPlatform: call?.originatingPlatform)
+                                    originatingPlatform: call?.originatingPlatform,
+                                    ownerJoinedLocal: call?.ownerJoinedLocal == true)
             }
         }
         .onDisappear { RecordingPlaybackController.shared.stop() }
@@ -1481,18 +1497,23 @@ private struct RecordingRecordView: View {
     @State private var shareItems: [URL] = []
     @State private var showingShare = false
 
-    init(callID: String, gatewayTimeZone: String?, gatewayKind: String? = nil, originatingPlatform: String? = nil) {
+    private let ownerJoinedLocal: Bool
+
+    init(callID: String, gatewayTimeZone: String?, gatewayKind: String? = nil, originatingPlatform: String? = nil,
+         ownerJoinedLocal: Bool = false) {
         self.callID = callID
+        self.ownerJoinedLocal = ownerJoinedLocal
         self.gatewayTimeZone = gatewayTimeZone
         self.gatewayKind = gatewayKind
-        _recordingSource = State(initialValue: .defaultSource(originatingPlatform: originatingPlatform))
+        _recordingSource = State(initialValue: .defaultSource(originatingPlatform: originatingPlatform,
+                                                                          ownerJoinedLocal: ownerJoinedLocal))
     }
 
     var body: some View {
         List {
             Section {
                 Picker("录音副本", selection: $recordingSource) {
-                    ForEach(RecordingSource.allCases, id: \.rawValue) { Text($0.title(gatewayKind: gatewayKind)).tag($0) }
+                    ForEach(RecordingSource.allCases, id: \.rawValue) { Text($0.title(gatewayKind: gatewayKind, ownerJoinedLocal: ownerJoinedLocal)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("records.recordingSource")
@@ -1537,6 +1558,16 @@ private struct RecordingRecordView: View {
                 Label("归档尚未完整发布。", systemImage: "waveform.badge.exclamationmark").font(.footnote).foregroundStyle(.orange)
             } else if manifest.captureComplete == false {
                 Label("录制期间存在缺音，仍可试听已保存内容。", systemImage: "waveform.badge.exclamationmark").font(.footnote).foregroundStyle(.orange)
+            }
+            // S94: when the Pixel archive carries the uplink capture, it is the default pair (listed first).
+            if manifest.defaultTogetherMode == .ownerJoined {
+                togetherPlayback(
+                    title: "通话双方（含本机接入）",
+                    detail: "对方原声 + 本机上行（含机主在本机接入后说的话）；可能存在时间偏差。",
+                    mode: .ownerJoined,
+                    playable: manifest.ownerJoinedPlaybackArtifacts,
+                    source: manifest.source
+                )
             }
             togetherPlayback(
                 title: "双向原声一起播放",

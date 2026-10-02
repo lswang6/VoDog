@@ -18,6 +18,15 @@ enum class OriginalAudioTrack(val fileStem: String) {
     CALLER_ORIGINAL("caller_original"),
 }
 
+/**
+ * S94: the cellular uplink (the Pixel's own microphone side, i.e. the injected caller audio plus the
+ * owner once they join locally). Deliberately not in [OriginalAudioTrack.entries]: those drive the
+ * always-open tracks and passive/crash recovery, while this one is opened lazily on its first PCM.
+ */
+enum class UplinkAudioTrack(val fileStem: String) {
+    CALLER_UPLINK("caller_uplink"),
+}
+
 enum class DerivedAudioTrack(val fileStem: String) {
     /** Decoded caller playout, including any explicitly labelled FEC/PLC synthesis. */
     CALLER_PLAYOUT("caller_playout"),
@@ -50,6 +59,7 @@ data class LocalRecordingManifest(
     val endedAt: String,
     val tracks: Map<OriginalAudioTrack, TrackRecordingResult>,
     val derivedTracks: Map<DerivedAudioTrack, DerivedTrackRecordingResult> = emptyMap(),
+    val uplinkTracks: Map<UplinkAudioTrack, TrackRecordingResult> = emptyMap(),
     val sessionStats: Map<String, Long> = emptyMap(),
     val timelineBytes: Long = 0,
     val timelineSha256: String = "",
@@ -78,6 +88,10 @@ class LocalCallRecorder(
     private val timeline: RandomAccessFile
     private val tracks: Map<OriginalAudioTrack, WavTrack>
     private var callerPlayout: WavTrack? = null
+    private var callerUplink: WavTrack? = null
+    private var uplinkDropped = false
+    /** S94: an uplink writer is open (it only exists once PCM was appended). */
+    val hasUplink: Boolean get() = callerUplink != null
     private val startedAt = wallClock().toString()
     private var closed = false
 
@@ -137,6 +151,32 @@ class LocalCallRecorder(
         writer.nextTimestampUs = timelineUs + pcm16le.size * 1_000_000L / BYTES_PER_SECOND
     }
 
+    /** S94: same frame/timeline shape as [append]; `sourceTimestampUs` is the AudioRecord clock. */
+    fun appendUplink(pcm16le: ByteArray, timestampUs: Long, sourceTimestampUs: Long? = null) {
+        check(!closed); require(timestampUs >= 0 && pcm16le.isNotEmpty() && pcm16le.size % 2 == 0)
+        if (uplinkDropped) return
+        val track = UplinkAudioTrack.CALLER_UPLINK
+        val writer = callerUplink ?: WavTrack(File(directory, "${track.fileStem}.wav.part")).also { callerUplink = it }
+        recordTimelineGap(writer, track.fileStem, timestampUs)
+        val offset = writer.append(pcm16le)
+        timeline.writeUtf8("{\"event\":\"frame\",\"track\":\"${track.fileStem}\",\"timestampUs\":$timestampUs,\"sourceTimestampUs\":${sourceTimestampUs ?: "null"},\"fileOffset\":$offset,\"sampleCount\":${pcm16le.size / 2}}\n")
+        writer.nextTimestampUs = timestampUs + pcm16le.size * 1_000_000L / BYTES_PER_SECOND
+    }
+
+    /**
+     * S94: drops the uplink track whole (write failure, or never a non-zero sample). [finish] then
+     * strips its rows from the timeline, since the validator rejects rows for an absent track, and
+     * the manifest falls back to v3/v2. Later uplink appends are ignored.
+     */
+    fun abortUplink() {
+        check(!closed)
+        uplinkDropped = true
+        val writer = callerUplink ?: return
+        callerUplink = null
+        runCatching { writer.abort() }
+        File(directory, "${UplinkAudioTrack.CALLER_UPLINK.fileStem}.wav.part").delete()
+    }
+
     private fun recordTimelineGap(writer: WavTrack, track: String, timestampUs: Long) {
         val expected = writer.nextTimestampUs
         if (expected != null && timestampUs > expected + FRAME_TOLERANCE_US) {
@@ -149,6 +189,30 @@ class LocalCallRecorder(
         check(!closed); require(frames > 0)
         val writer = requireNotNull(tracks[track]); writer.droppedFrames += frames; writer.gapCount++
         timeline.writeUtf8("{\"event\":\"gap\",\"track\":\"${track.fileStem}\",\"timestampUs\":$timestampUs,\"reason\":\"local_queue_drop\",\"frames\":$frames}\n")
+    }
+
+    /**
+     * S94 uplink markers. The track only exists once PCM was appended; a marker before that is a
+     * no-op, since a timeline row for an absent track would be rejected by the archive validator.
+     * ponytail: drops counted before the first uplink frame are therefore not recorded.
+     */
+    fun markDropped(track: UplinkAudioTrack, timestampUs: Long, frames: Long = 1) {
+        check(!closed); require(frames > 0)
+        val writer = callerUplink ?: return
+        writer.droppedFrames += frames; writer.gapCount++
+        timeline.writeUtf8("{\"event\":\"gap\",\"track\":\"${track.fileStem}\",\"timestampUs\":$timestampUs,\"reason\":\"local_queue_drop\",\"frames\":$frames}\n")
+    }
+
+    fun markCaptureGapDuration(track: UplinkAudioTrack, timestampUs: Long, durationUs: Long) {
+        check(!closed); require(timestampUs >= 0 && durationUs > 0)
+        val writer = callerUplink ?: return
+        writer.gapCount++
+        timeline.writeUtf8("{\"event\":\"gap\",\"track\":\"${track.fileStem}\",\"timestampUs\":$timestampUs,\"durationUs\":$durationUs}\n")
+    }
+
+    fun markCaptureIncomplete(@Suppress("UNUSED_PARAMETER") track: UplinkAudioTrack) {
+        check(!closed)
+        callerUplink?.captureInvalidated = true
     }
 
     fun markCaptureGap(
@@ -187,6 +251,7 @@ class LocalCallRecorder(
             } finally {
                 timeline.close()
             }
+            if (uplinkDropped) dropTimelineTrack(File(directory, "timeline.jsonl.part"), UplinkAudioTrack.CALLER_UPLINK.fileStem)
             atomicRename(File(directory, "timeline.jsonl.part"), timelineFile)
         }.onFailure(failures::add)
         val results = linkedMapOf<OriginalAudioTrack, TrackRecordingResult>()
@@ -195,14 +260,18 @@ class LocalCallRecorder(
         val derivedResults = linkedMapOf<DerivedAudioTrack, DerivedTrackRecordingResult>()
         callerPlayout?.let { writer -> runCatching { writer.finishDerived(DerivedAudioTrack.CALLER_PLAYOUT) }
             .onSuccess { derivedResults[DerivedAudioTrack.CALLER_PLAYOUT] = it }.onFailure(failures::add) }
+        val uplinkResults = linkedMapOf<UplinkAudioTrack, TrackRecordingResult>()
+        callerUplink?.let { writer -> runCatching { writer.finishOriginal(UplinkAudioTrack.CALLER_UPLINK.fileStem) }
+            .onSuccess { uplinkResults[UplinkAudioTrack.CALLER_UPLINK] = it }.onFailure(failures::add) }
         if (failures.isNotEmpty()) throw IllegalStateException("recording finalization failed", failures.first())
         // A transport/codec/endpoint fatal event means the capture ended without an authoritative
         // continuous-media guarantee, even if Telecom reports a normal call end moments later.
         if ((sessionStats["mediaFatalEvents"] ?: 0L) > 0L) {
             results.replaceAll { _, result -> result.copy(captureComplete = false) }
+            uplinkResults.replaceAll { _, result -> result.copy(captureComplete = false) }
         }
         val manifest = LocalRecordingManifest(callId, finiteState(terminalState), startedAt, endedAt,
-            results, derivedResults, sessionStats, timelineFile.length(), sha256(timelineFile), captureBinding)
+            results, derivedResults, uplinkResults, sessionStats, timelineFile.length(), sha256(timelineFile), captureBinding)
         writeManifest(directory, manifest)
         return manifest
     }
@@ -244,8 +313,9 @@ class LocalCallRecorder(
             atomicRename(part, destination)
             return destination
         }
-        fun finishOriginal(track: OriginalAudioTrack): TrackRecordingResult {
-            val destination = finish(track.fileStem)
+        fun finishOriginal(track: OriginalAudioTrack): TrackRecordingResult = finishOriginal(track.fileStem)
+        fun finishOriginal(fileStem: String): TrackRecordingResult {
+            val destination = finish(fileStem)
             return TrackRecordingResult(destination.name, destination.length(), sha256(destination), pcmBytes,
                 gapCount, droppedFrames, pcmBytes > 0L && gapCount == 0L && droppedFrames == 0L && !captureInvalidated)
         }
@@ -300,6 +370,23 @@ class LocalCallRecorder(
                     (wav.length() - WAV_HEADER_BYTES).coerceAtLeast(0), 1, 0, false,
                 )
             }.toMap()
+            // S94: a header-only uplink part never carried a frame row; drop it instead of publishing it.
+            val uplinkResults = UplinkAudioTrack.entries.mapNotNull { track ->
+                val part = File(dir, "${track.fileStem}.wav.part")
+                val wav = File(dir, "${track.fileStem}.wav")
+                if (part.exists()) {
+                    if (part.length() <= WAV_HEADER_BYTES) check(part.delete()) else {
+                        RandomAccessFile(part, "rw").use { file ->
+                            writeWavHeader(file, file.length() - WAV_HEADER_BYTES); file.fd.sync()
+                        }
+                        atomicRename(part, wav)
+                    }
+                }
+                if (!wav.exists()) null else track to TrackRecordingResult(
+                    wav.name, wav.length(), sha256(wav),
+                    (wav.length() - WAV_HEADER_BYTES).coerceAtLeast(0), 1, 0, false,
+                )
+            }.toMap()
             val timeline = File(dir, "timeline.jsonl")
             File(dir, "timeline.jsonl.part").takeIf(File::exists)?.let { atomicRename(it, timeline) }
             if (!timeline.exists()) RandomAccessFile(timeline, "rw").use {
@@ -307,13 +394,27 @@ class LocalCallRecorder(
             }
             val binding = readCaptureBinding(File(dir, CAPTURE_FILE), callId)
             LocalRecordingManifest(callId, "recovered_incomplete", started, Instant.now().toString(), results,
-                derivedTracks = derivedResults, timelineBytes = timeline.length(),
+                derivedTracks = derivedResults, uplinkTracks = uplinkResults, timelineBytes = timeline.length(),
                 timelineSha256 = sha256(timeline), captureBinding = binding)
                 .also { writeManifest(dir, it) }
         }
 
         private const val CAPTURE_FILE = "capture.json"
     }
+}
+
+/** S94: rewrites [part] without the rows of [track] (rows are written here, so the key is exact). */
+private fun dropTimelineTrack(part: File, track: String) {
+    val marker = "\"track\":\"$track\""
+    val filtered = File(part.parentFile, part.name + ".filtered")
+    RandomAccessFile(filtered, "rw").use { out ->
+        out.setLength(0)
+        part.bufferedReader(Charsets.UTF_8).useLines { lines ->
+            lines.filterNot { marker in it }.forEach { out.writeUtf8(it + "\n") }
+        }
+        out.fd.sync()
+    }
+    check(filtered.renameTo(part)) { "timeline filter rename failed" }
 }
 
 private fun writeWavHeader(file: RandomAccessFile, pcmBytes: Long) {
@@ -353,12 +454,17 @@ private fun writeManifest(directory: File, manifest: LocalRecordingManifest) {
     val binding = manifest.captureBinding
     val captureJson = binding?.let { ",\"captureBinding\":${captureJson(it, includeCallId = false)}" }.orEmpty()
     val derivedJson = if (manifest.derivedTracks.isEmpty()) "" else ",\"derivedTracks\":{$derivedTracks}"
+    val uplinkTracks = manifest.uplinkTracks.entries.joinToString(",") { (key, value) ->
+        "\"${key.fileStem}\":{\"file\":\"${value.fileName}\",\"bytes\":${value.bytes},\"sha256\":\"${value.sha256}\",\"pcmBytes\":${value.pcmBytes},\"gapCount\":${value.gapCount},\"droppedFrames\":${value.droppedFrames},\"captureComplete\":${value.captureComplete}}"
+    }
+    val uplinkJson = if (manifest.uplinkTracks.isEmpty()) "" else ",\"uplinkTracks\":{$uplinkTracks}"
     val version = when {
+        manifest.uplinkTracks.isNotEmpty() -> 4
         manifest.derivedTracks.isNotEmpty() -> 3
         binding != null -> 2
         else -> 1
     }
-    val json = "{\"version\":$version,\"callId\":\"${manifest.callId}\"$captureJson,\"terminalState\":\"${manifest.terminalState}\",\"startedAt\":\"${manifest.startedAt}\",\"endedAt\":\"${manifest.endedAt}\",\"tracks\":{$tracks}$derivedJson,\"timeline\":{\"file\":\"timeline.jsonl\",\"bytes\":${manifest.timelineBytes},\"sha256\":\"${manifest.timelineSha256}\"},\"sessionStats\":{$stats}}"
+    val json = "{\"version\":$version,\"callId\":\"${manifest.callId}\"$captureJson,\"terminalState\":\"${manifest.terminalState}\",\"startedAt\":\"${manifest.startedAt}\",\"endedAt\":\"${manifest.endedAt}\",\"tracks\":{$tracks}$derivedJson$uplinkJson,\"timeline\":{\"file\":\"timeline.jsonl\",\"bytes\":${manifest.timelineBytes},\"sha256\":\"${manifest.timelineSha256}\"},\"sessionStats\":{$stats}}"
     RandomAccessFile(part, "rw").use { it.setLength(0); it.writeUtf8(json); it.fd.sync() }
     atomicRename(part, File(directory, "manifest.json"))
     syncDirectory(directory)

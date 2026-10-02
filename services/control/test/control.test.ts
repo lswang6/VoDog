@@ -99,6 +99,7 @@ test('logout accepts the native empty request and malformed empty JSON stays a p
 
 test('SIM, call, and SMS collections are isolated by owner snapshot',async()=>{
   const a=await app.inject({method:'GET',url:'/api/v1/sims',headers:auth(token1)});assert.deepEqual(a.json().items.map((x:any)=>x.id),[sim1]);
+  assert.equal(a.json().items[0].gatewayName,'real-test-gateway','S91: /sims carries gateways.name');
   const b=await app.inject({method:'GET',url:'/api/v1/sims',headers:auth(token2)});assert.deepEqual(b.json().items.map((x:any)=>x.id),[sim2]);
   await db.query(`INSERT INTO call_records(gateway_id,sim_id,snapshot_owner_id,direction,state,generation,mode_snapshot,ended_at)VALUES($1,$2,$3,'incoming','ended',1,'normal',now())`,[gateway,sim1,user1]);
   await db.query(`UPDATE sims SET owner_user_id=$2 WHERE id=$1`,[sim1,user2]);
@@ -813,6 +814,24 @@ test('S54: a macos login is a native session and may post and filter macos diag 
   assert.equal(read.statusCode,200,read.body);assert.match(read.body,/"source":"macos"/);
   const push=await app.inject({method:'PUT',url:'/api/v1/push/registrations/00000000-0000-4000-8000-000000000054',headers:auth(refreshed.json().token),payload:{platform:'macos'}});
   assert.equal(push.statusCode,400,push.body);
+});
+
+test('S93: a refresh token replaced by rotation stays redeemable until the new access token is used',async()=>{
+  const login=await app.inject({method:'POST',url:'/api/v1/auth/login',payload:{username:'one@example.test',password:'correct horse battery staple',platform:'ios',deviceName:'iPhone'}});
+  assert.equal(login.statusCode,200,login.body);
+  const first=login.json().refreshToken;
+  const refresh=(refreshToken:string)=>app.inject({method:'POST',url:'/api/v1/auth/refresh',payload:{refreshToken}});
+  const lost=await refresh(first);assert.equal(lost.statusCode,200,lost.body);
+  // The app died before saving `lost`: the old refresh token still works and yields a fresh pair.
+  const retried=await refresh(first);assert.equal(retried.statusCode,200,retried.body);
+  assert.notEqual(retried.json().token,lost.json().token);
+  assert.equal((await refresh(lost.json().refreshToken)).statusCode,401,'the undelivered pair is superseded');
+  const me=await app.inject({method:'GET',url:'/api/v1/auth/me',headers:auth(retried.json().token)});
+  assert.equal(me.statusCode,200,me.body);
+  assert.equal((await refresh(first)).statusCode,401,'grace ends once the new access token is used');
+  // A normal rotation keeps the same grace for the token it replaced.
+  const next=await refresh(retried.json().refreshToken);assert.equal(next.statusCode,200,next.body);
+  assert.equal((await refresh(retried.json().refreshToken)).statusCode,200);
 });
 
 test('S36 C3: diag read is ndjson ordered by ts and scoped to the caller unless admin',async()=>{

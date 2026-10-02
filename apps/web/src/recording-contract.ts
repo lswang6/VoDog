@@ -1,9 +1,14 @@
 export type RecordingSource = 'media_node' | 'pixel';
+/** S94b：手机直拨或本机接入的通话，默认打开设备原始归档；本机接入时服务器录音不含机主声音。 */
+export const preferPixelSource=(c:{originatingPlatform?:string|null;ownerJoinedLocal?:boolean})=>c.originatingPlatform==='pixel'||c.ownerJoinedLocal===true;
+export const serverRecordingLabel=(ownerJoinedLocal?:boolean)=>ownerJoinedLocal?'服务器录音（不含本机接入）':'服务器录音';
 export type OriginalRecordingTrack = 'remote_original' | 'caller_original';
 export type DerivedRecordingTrack = 'caller_playout';
+/** S94: 网关 VOICE_UPLINK 采集，含机主在本机接入后说的话；只有 Pixel 归档 v4 才有。 */
+export type UplinkRecordingTrack = 'caller_uplink';
 /** S36 C4: `conversation` 是虚拟轨——服务端把双方声音时间对齐后混成一条 mp3，没有对应的归档描述。 */
 export type VirtualRecordingTrack = 'conversation';
-export type RecordingTrack = OriginalRecordingTrack | DerivedRecordingTrack | VirtualRecordingTrack;
+export type RecordingTrack = OriginalRecordingTrack | DerivedRecordingTrack | UplinkRecordingTrack | VirtualRecordingTrack;
 export type TrackDescriptor = {
  id: OriginalRecordingTrack; sourceRole: 'original_capture'; mediaType: 'audio/ogg' | 'audio/wav'; bytes: number;
  sha256: string; captureComplete: boolean | null; gapCount: number; droppedFrames: number;
@@ -14,14 +19,21 @@ export type DerivedTrackDescriptor = {
  sha256: string; playoutComplete: boolean; gapCount: number; recoveryFrames: number;
  durationMs?: number;
 };
+export type UplinkTrackDescriptor = {
+ id: UplinkRecordingTrack; sourceRole: 'uplink_capture'; mediaType: 'audio/wav'; bytes: number;
+ sha256: string; captureComplete: boolean; gapCount: number; droppedFrames: number;
+ durationMs?: number;
+};
 export type RecordingDescriptor = {
  source: RecordingSource; version: 1 | 2 | 3; callId: string; archiveId?: string;
  manifestSha256?: string;
  archiveComplete: boolean; captureComplete: boolean | null; finalizedAt: string;
  tracks: TrackDescriptor[]; derivedTracks: DerivedTrackDescriptor[];
+ /** S94: 对外描述符的 `version` 仍是 2/3；有上行轨时另带 `archiveVersion: 4`。 */
+ archiveVersion?: 4; uplinkTracks: UplinkTrackDescriptor[];
 };
 const originalTrackIds: OriginalRecordingTrack[] = ['remote_original', 'caller_original'];
-const trackIds: RecordingTrack[] = [...originalTrackIds, 'caller_playout', 'conversation'];
+const trackIds: RecordingTrack[] = [...originalTrackIds, 'caller_playout', 'caller_uplink', 'conversation'];
 const hash = /^[0-9a-f]{64}$/;
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const invalid = () => new Error('录音信息与所选副本不一致，请稍后重试。');
@@ -61,7 +73,7 @@ export function parseRecording(value: unknown, source: RecordingSource, callId: 
     const artifact = artifacts.find(a => a.name === `${id}.ogg`)!;
     return {id, sourceRole: 'original_capture', mediaType: 'audio/ogg', bytes: count(artifact.bytes), sha256: sha(artifact.sha256),
      captureComplete: null, gapCount: 0, droppedFrames: 0, durationMs: optionalDurationMs(artifact.durationMs)};
-   }), derivedTracks: []};
+   }), derivedTracks: [], uplinkTracks: []};
  }
  if (raw.source !== 'pixel' || (raw.version !== 2 && raw.version !== 3) || typeof raw.archiveId !== 'string' || !uuid.test(raw.archiveId)) throw invalid();
  const manifestSha256 = sha(raw.manifestSha256);
@@ -88,6 +100,18 @@ export function parseRecording(value: unknown, source: RecordingSource, callId: 
    sha256: sha(derived.sha256), playoutComplete: flag(derived.playoutComplete), gapCount: count(derived.gapCount),
    recoveryFrames: count(derived.recoveryFrames), durationMs: optionalDurationMs(derived.durationMs)}];
  }
+ // S94: `archiveVersion: 4` 与恰好一条 `uplinkTracks` 必须同时出现；上行轨不影响整体 captureComplete。
+ let uplinkTracks: UplinkTrackDescriptor[] = [];
+ if (raw.archiveVersion !== undefined || raw.uplinkTracks !== undefined) {
+  if (raw.archiveVersion !== 4 || !Array.isArray(raw.uplinkTracks) || raw.uplinkTracks.length !== 1) throw invalid();
+  const uplink = object(raw.uplinkTracks[0]);
+  if (uplink.track !== 'caller_uplink' || uplink.sourceRole !== 'uplink_capture' || uplink.mediaType !== 'audio/wav') throw invalid();
+  const bytes = count(uplink.bytes, 1024 * 1024 * 1024);
+  if (bytes < 44) throw invalid();
+  uplinkTracks = [{id: 'caller_uplink', sourceRole: 'uplink_capture', mediaType: 'audio/wav', bytes, sha256: sha(uplink.sha256),
+   captureComplete: flag(uplink.captureComplete), gapCount: count(uplink.gapCount), droppedFrames: count(uplink.droppedFrames),
+   durationMs: optionalDurationMs(uplink.durationMs)}];
+ }
  const timeline = object(raw.timeline);
  if (timeline.mediaType !== 'application/x-ndjson') throw invalid();
  if (count(timeline.bytes, 1024 * 1024 * 1024) < 1) throw invalid();
@@ -97,17 +121,17 @@ export function parseRecording(value: unknown, source: RecordingSource, callId: 
  const archiveComplete = flag(raw.archiveComplete), captureComplete = flag(raw.captureComplete);
  if (!archiveComplete || captureComplete !== tracks.every(t => t.captureComplete)) throw invalid();
  return {source, version: raw.version, callId, archiveId: raw.archiveId, manifestSha256, archiveComplete, captureComplete,
-  finalizedAt: endedAt, tracks, derivedTracks};
+  finalizedAt: endedAt, tracks, derivedTracks, uplinkTracks, ...(uplinkTracks.length ? {archiveVersion: 4 as const} : {})};
 }
 /** S36 C4: `format=mp3` 只用于导出下载；播放 URL 不带 format，保持原始编码。 */
 export function recordingUrl(callId: string, source: RecordingSource, track?: RecordingTrack, disposition?: 'attachment', format?: 'mp3'): string {
  if (!uuid.test(callId) || !['media_node', 'pixel'].includes(source) || (track !== undefined && !trackIds.includes(track)) ||
-     (track === 'caller_playout' && source !== 'pixel') || (track === 'conversation' && format !== 'mp3') || (disposition === 'attachment' && !track) ||
+     ((track === 'caller_playout' || track === 'caller_uplink') && source !== 'pixel') || (track === 'conversation' && format !== 'mp3') || (disposition === 'attachment' && !track) ||
      (format !== undefined && (format !== 'mp3' || disposition !== 'attachment'))) throw invalid();
  const query = disposition === 'attachment' ? `source=${source}&disposition=attachment` : `source=${source}`;
  return `/api/v1/calls/${encodeURIComponent(callId)}/recordings${track ? `/${track}` : ''}?${query}${format ? `&format=${format}` : ''}`;
 }
-const attachmentName = /^(?:call-)?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}-(?:(?:media_node|pixel)-)?(?:remote_original|caller_original|caller_playout|conversation)\.(?:ogg|wav|mp3)$/i;
+const attachmentName = /^(?:call-)?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}-(?:(?:media_node|pixel)-)?(?:remote_original|caller_original|caller_playout|caller_uplink|conversation)\.(?:ogg|wav|mp3)$/i;
 /** S36 C4: 导出 mp3 时文件名必须是 .mp3；服务端的 `<callId>-<track>.mp3` 没有 `call-`/来源前缀，也要认。 */
 export function recordingAttachmentFilename(callId: string, source: RecordingSource, track: RecordingTrack, header?: string | null, format?: 'mp3'): string {
  const ext = format === 'mp3' ? 'mp3' : source === 'pixel' ? 'wav' : 'ogg';
@@ -116,7 +140,7 @@ export function recordingAttachmentFilename(callId: string, source: RecordingSou
  return quoted && attachmentName.test(quoted) ? quoted : fallback;
 }
 /** Verify the one-byte preflight before exposing a WAV URL to the native browser player. */
-export function verifyPixelTrackHeaders(status: number, headers: Headers, track: TrackDescriptor | DerivedTrackDescriptor): void {
+export function verifyPixelTrackHeaders(status: number, headers: Headers, track: TrackDescriptor | DerivedTrackDescriptor | UplinkTrackDescriptor): void {
  if (headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'audio/wav' ||
      headers.get('ETag') !== `"${track.sha256}"` || headers.get('Accept-Ranges')?.toLowerCase() !== 'bytes') throw invalid();
  if (status === 206 && headers.get('Content-Range') === `bytes 0-0/${track.bytes}` && headers.get('Content-Length') === '1') return;

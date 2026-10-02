@@ -599,24 +599,17 @@ struct CallsView<Content: View>: View {
                                 RecentCallTitle(number: call.shownNumber(in: sims), contactName: call.shownContactName)
                                 Text(callLineTitle(call.simId, in: sims) ?? simTitle(call.simId, in: sims))
                                     .font(.caption).foregroundStyle(.secondary)
+                                // Accessibility sizes: the right column moves under the text instead of squeezing it.
+                                if dynamicTypeSize.isAccessibilitySize {
+                                    recentCallFacts(call, alignment: .leading).font(.caption)
+                                }
                             }
                             Spacer()
-                            // S82: duration (when answered), date, status stacked right-aligned so 未接来电 never wraps.
-                            VStack(alignment: .trailing, spacing: 3) {
-                                if let duration = CallDurationLabel.text(answeredAt: call.answeredAt, endedAt: call.endedAt) {
-                                    Text(duration).foregroundStyle(.secondary)
-                                        .accessibilityLabel("通话时长 \(duration)")
-                                }
-                                Text(GatewayTimeDisplay.compact(
-                                    call.endedAt ?? call.startedAt,
-                                    timeZone: GatewayTimeDisplay.resolvedTimeZone(
-                                        callZone: call.gatewayTimeZone,
-                                        simZone: sims.first { $0.id == call.simId }?.timeZone
-                                    )
-                                )).foregroundStyle(.secondary)
-                                Text(call.rowStateTitle).foregroundStyle(call.isMissedIncoming ? .red : .secondary)
+                            if !dynamicTypeSize.isAccessibilitySize {
+                                // S82: duration (when answered), date, status stacked right-aligned so 未接来电 never wraps.
+                                recentCallFacts(call, alignment: .trailing)
+                                    .font(.caption).lineLimit(1).fixedSize()
                             }
-                            .font(.caption).lineLimit(1).fixedSize()
                         }
                     }
                     .padding()
@@ -625,6 +618,23 @@ struct CallsView<Content: View>: View {
             }
         }
         .onTapGesture { showingKeypad = false }
+    }
+
+    private func recentCallFacts(_ call: CallRecord, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            if let duration = CallDurationLabel.text(answeredAt: call.answeredAt, endedAt: call.endedAt) {
+                Text(duration).foregroundStyle(.secondary)
+                    .accessibilityLabel("通话时长 \(duration)")
+            }
+            Text(GatewayTimeDisplay.compact(
+                call.endedAt ?? call.startedAt,
+                timeZone: GatewayTimeDisplay.resolvedTimeZone(
+                    callZone: call.gatewayTimeZone,
+                    simZone: sims.first { $0.id == call.simId }?.timeZone
+                )
+            )).foregroundStyle(.secondary)
+            Text(call.rowStateTitle).foregroundStyle(call.isMissedIncoming ? .red : .secondary)
+        }
     }
 
     /// S20 decision 5: 2 s while one of this session's own calls is still moving, 5 s otherwise.

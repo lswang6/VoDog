@@ -31,6 +31,23 @@ internal fun muteStateAfterAudioCallback(record: MuteLeaseRecord, muted: Boolean
     else -> record
 }
 
+/**
+ * S94 本机接入: the owner unmuted the exact armed, ACTIVE call while the gateway lease held it MUTED.
+ * REQUESTING_MUTE / RESTORING callbacks are the gateway's own setMuted and never qualify.
+ */
+internal fun isOwnerLocalJoin(
+    before: MuteLeaseRecord,
+    muted: Boolean,
+    holderDeviceCallId: String,
+    holderCreationTimeMillis: Long,
+    holderArmed: Boolean,
+    callActive: Boolean,
+    // Answering a call-waiting call makes Telecom unmute; only a lone call can be an owner join.
+    otherLiveCall: Boolean = false,
+): Boolean = before.phase == MuteLeasePhase.MUTED && !muted && holderArmed && callActive && !otherLiveCall &&
+    before.deviceCallId != null && before.creationTimeMillis != null &&
+    sameCallIdentity(before.deviceCallId, before.creationTimeMillis, holderDeviceCallId, holderCreationTimeMillis)
+
 internal fun sameMuteLease(first: MuteLeaseRecord, second: MuteLeaseRecord): Boolean =
     first.leaseId != null && first.leaseId == second.leaseId &&
         first.deviceCallId == second.deviceCallId && first.creationTimeMillis == second.creationTimeMillis
@@ -82,10 +99,29 @@ internal object GatewayInCallAudioBridge {
     fun detach(value: GatewayInCallService) {
         if (service.get()?.get() === value) service.set(null)
     }
+    /**
+     * Main thread. S94: an owner join only sets the session atomic, clears the lease to IDLE (the
+     * owner manages mute from now on) and posts the IO work; it never takes the session setupLock.
+     */
     fun onAudioState(context: Context, muted: Boolean) {
         runCatching {
             val store = MuteLeaseStore(context)
             val before = store.read()
+            val holder = GatewayActiveAudioSession.current()
+            if (holder != null && isOwnerLocalJoin(before, muted, holder.deviceCallId, holder.creationTimeMillis,
+                    holder.armed.get(), GatewayTelecomCallRegistry.snapshot(holder.deviceCallId)?.state == ActualTelecomState.ACTIVE)) {
+                val otherLiveCall = hasUnrelatedLiveCall(GatewayTelecomCallRegistry.snapshots(), holder.deviceCallId)
+                if (holder.answeredByAi && !otherLiveCall) {
+                    holder.session.markOwnerLocal()
+                    // The IO work goes first: a failing lease write must not strand the takeover.
+                    GatewayOwnerLocalJoin.enter(context, holder)
+                    runCatching { store.clear() }
+                    return@runCatching
+                }
+                // S94 决策 4: a human-bridged call keeps injecting; only the observation is recorded. So does
+                // an unmute while a second call is live (Telecom unmutes when call waiting is answered).
+                GatewayDiag.log("call.owner_unmuted_local", mapOf("otherLiveCall" to otherLiveCall), callId = holder.serverCallId)
+            }
             val after = muteStateAfterAudioCallback(before, muted)
             if (after != before) store.write(after)
         }

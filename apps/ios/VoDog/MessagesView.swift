@@ -218,9 +218,14 @@ struct MessagesView: View {
         let generation = loadGeneration
         do {
             async let simResult: ItemEnvelope<SIMChannel> = session.request("sims", requiredSessionIdentity: identity)
-            async let smsResult: ItemEnvelope<SMSMessage> = session.request("sms", requiredSessionIdentity: identity)
+            async let smsResult = SMSFullListPolicy.fetchAll { query -> SMSPageEnvelope<SMSMessage> in
+                try await session.request("sms", requiredSessionIdentity: identity, queryItems: query)
+            }
             let result = try await (simResult, smsResult)
             guard session.isCurrentSession(identity), generation == loadGeneration else { return }
+            if result.1.capped {
+                Diag.shared.log("sms.list_capped", ["pages": SMSFullListPolicy.maxPages, "count": result.1.items.count])
+            }
             sims = result.0.items
             messages = result.1.items.filter { !deletedMessageIDs.contains($0.id) }
             selectedSIM = SIMSelectionPolicy.preferredID(in: sims, current: selectedSIM)
@@ -362,10 +367,14 @@ private struct ConversationRow: View {
             }
             Text(conversation.latest?.body ?? "").lineLimit(2).foregroundStyle(.secondary)
             if let latest = conversation.latest {
-                HStack(spacing: 8) {
-                    Label(latest.directionTitle, systemImage: latest.directionIcon)
+                // Accessibility sizes stack the three facts; a shared line squeezed 收到 into 收/到.
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2)) : AnyLayout(HStackLayout(spacing: 8))
+                layout {
+                    // S92: explicit style — inside AnyLayout the automatic style dropped the title and left only the arrow.
+                    Label(latest.directionTitle, systemImage: latest.directionIcon).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
                     Text(simTitle(latest.simId, in: sims))
-                    Text(latest.deliveryTitle)
+                    if let status = latest.statusTitleForRow { Text(status) }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -426,6 +435,10 @@ struct ConversationView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
+          // S92: a thread shorter than the screen was bottom-aligned by `defaultScrollAnchor` with a negative
+          // offset, which sometimes fired the pull-to-refresh on open (spinner + a full SMS reload, no pull).
+          // Filling at least the viewport and aligning to the bottom keeps the offset at zero.
+          GeometryReader { viewport in
             ScrollView {
                 LazyVStack(spacing: 10) {
                     if let caption = ConversationLineCaption.text(sim: sims.first { $0.id == conversation.id.simID }) {
@@ -462,6 +475,7 @@ struct ConversationView: View {
                     }
                 }
                 .padding()
+                .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .bottom)
             }
             // Open at the newest message (and keep it in view when the reply keyboard shrinks the viewport). A
             // scrollTo in onAppear ran before the LazyVStack laid out the last row, so threads opened at the top.
@@ -469,13 +483,14 @@ struct ConversationView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             // Scrolling the transcript away is the natural way to put the reply keyboard down.
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await onRefresh() }
+            .refreshable { Diag.shared.log("sms.thread_refresh", [:]); await onRefresh() }
             .onAppear {
                 if let accountID = session.user?.id { replyBody = drafts.reply(accountID: accountID, conversation: conversation.id) }
             }
             .onChange(of: currentMessages.count) { _, _ in
                 if let id = currentMessages.last?.id { withAnimation { proxy.scrollTo(id, anchor: .bottom) } }
             }
+          }
         }
         .navigationTitle(conversation.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -730,6 +745,10 @@ private struct MessageBubble: View {
     var selected = false
     var onSelectText: () -> Void = {}
     var onMultiSelect: (() -> Void)?
+    /// S87: a tapped link waits here for 「打开」. `.alert`, not `confirmationDialog` (see the S30 note at the top).
+    @State private var pendingLink: URL?
+
+    private var textColor: Color { message.direction == "outgoing" ? Color.callerOnAccent : Color.primary }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -751,15 +770,21 @@ private struct MessageBubble: View {
         HStack {
             if message.direction == "outgoing" { Spacer(minLength: 50) }
             VStack(alignment: message.direction == "outgoing" ? .trailing : .leading, spacing: 4) {
-                Text(message.body ?? "")
+                // S87: selection mode renders plain text so a tap on a link still only toggles.
+                Text(SMSLinkPolicy.attributed(message.body ?? "", color: textColor, linked: !selecting))
+                    .tint(textColor)
+                    .environment(\.openURL, OpenURLAction { url in
+                        pendingLink = url
+                        return .handled
+                    })
                     .padding(.horizontal, 12).padding(.vertical, 9)
                     .background(message.direction == "outgoing" ? Color.callerAccent : Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 17))
-                    .foregroundStyle(message.direction == "outgoing" ? Color.callerOnAccent : Color.primary)
+                    .foregroundStyle(textColor)
                     // S83: the menu sits on the bubble itself so the lift preview is just the bubble. Selection
                     // mode leaves the builder empty, which shows no menu, so the tap toggle is the only gesture.
                     .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 17))
                     .contextMenu { if !selecting { menuItems } }
-                Text("\(message.directionTitle) · \(simTitle(message.simId, in: sims)) · \(message.deliveryTitle)")
+                Text(([message.directionTitle, simTitle(message.simId, in: sims)] + [message.statusTitleForRow].compactMap { $0 }).joined(separator: " · "))
                     .font(.caption2).foregroundStyle(.secondary)
                 Text(displayDate(message.statusDate)).font(.caption2).foregroundStyle(.secondary)
                 if let reason = message.failureReason, !reason.isEmpty {
@@ -767,6 +792,16 @@ private struct MessageBubble: View {
                 }
             }
             if message.direction != "outgoing" { Spacer(minLength: 50) }
+        }
+        .alert(
+            "打开链接？",
+            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } }),
+            presenting: pendingLink
+        ) { url in
+            Button("打开") { if SMSLinkPolicy.isOpenable(url) { UIApplication.shared.open(url) } }
+            Button("取消", role: .cancel) {}
+        } message: { url in
+            Text(url.absoluteString)
         }
     }
 
@@ -1121,7 +1156,8 @@ extension SMSMessage {
                 ? "等待上一条短信状态确认" : "等待发送"
         case "sending": "发送中"
         case "sent": "已发送"
-        case "delivered": "已送达"
+        // 已送达 only means something for what we sent; an incoming row in `delivered` reads 已收到 (Android Formatting.kt).
+        case "delivered": direction?.lowercased() == "incoming" ? "已收到" : "已送达"
         case "received": "已接收"
         case "failed":
             switch failureReason {
@@ -1135,6 +1171,12 @@ extension SMSMessage {
         case let value?: value
         case nil: "状态未知"
         }
+    }
+
+    /// S92: 「收到」 already says it arrived, so an incoming delivered/received row drops the state; anything else shows.
+    var statusTitleForRow: String? {
+        let delivered = ["delivered", "received"].contains(state?.lowercased() ?? "")
+        return direction?.lowercased() == "incoming" && delivered ? nil : deliveryTitle
     }
 
     var statusDate: String? { deliveredAt ?? sentAt ?? receivedAt ?? createdAt }

@@ -43,6 +43,7 @@ const objectNames = [
   "caller_original.wav.gz",
   "timeline.jsonl.gz",
   "caller_playout.wav.gz",
+  "caller_uplink.wav.gz",
 ] as const;
 type ObjectName = (typeof objectNames)[number];
 const captureInput = z.object({
@@ -104,6 +105,35 @@ const originalTrack = z
         path: ["pcmBytes"],
         message: "PCM byte count must contain complete 16-bit samples",
       });
+  });
+// S94: owner-side VOICE_UPLINK capture. Same facts as an original track, its own role, never in `tracks`.
+const uplinkTrack = z
+  .object({
+    track: z.literal("caller_uplink"),
+    sourceRole: z.literal("uplink_capture"),
+    objectName: z.literal("caller_uplink.wav.gz"),
+    mediaType: z.literal("audio/wav"),
+    pcm: z.object({
+      sampleRate: z.literal(16000),
+      channels: z.literal(1),
+      bitsPerSample: z.literal(16),
+      encoding: z.literal("pcm_s16le"),
+    }),
+    compressedBytes: safePositive.max(512 * 1024 * 1024),
+    compressedSha256: sha,
+    originalBytes: safePositive.max(512 * 1024 * 1024),
+    originalSha256: sha,
+    pcmBytes: z.number().int().nonnegative().max(512 * 1024 * 1024),
+    gapCount: z.number().int().nonnegative(),
+    droppedFrames: z.number().int().nonnegative(),
+    captureComplete: z.boolean(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.originalBytes !== value.pcmBytes + 44)
+      ctx.addIssue({ code: "custom", path: ["originalBytes"], message: "WAV byte count does not match PCM byte count" });
+    if (value.pcmBytes % 2 !== 0)
+      ctx.addIssue({ code: "custom", path: ["pcmBytes"], message: "PCM byte count must contain complete 16-bit samples" });
   });
 const timeline = z.object({
   objectName: z.literal("timeline.jsonl.gz"),
@@ -192,6 +222,12 @@ const manifestInput = z
   .discriminatedUnion("version", [
     manifestBase.extend({ version: z.literal(2) }).strict(),
     manifestBase.extend({ version: z.literal(3), derivedTracks: z.array(derivedTrack).length(1) }).strict(),
+    // S94: derived playout stays optional (absent = none; `[]` is rejected), the uplink is exactly one.
+    manifestBase.extend({
+      version: z.literal(4),
+      derivedTracks: z.array(derivedTrack).length(1).optional(),
+      uplinkTracks: z.array(uplinkTrack).length(1),
+    }).strict(),
   ])
   .superRefine((value, ctx) => {
     if (new Set(value.tracks.map((item) => item.track)).size !== 2)
@@ -242,12 +278,27 @@ const pixelDescriptor = z.object({
     gapCount: z.number().int().nonnegative(),
     recoveryFrames: z.number().int().nonnegative(),
   })).length(1).optional(),
+  // S94: v4 archives only. `version` stays 2/3 and `tracks` stays the two originals so every
+  // released decoder keeps reading them; these two keys are present together or not at all.
+  archiveVersion: z.literal(4).optional(),
+  uplinkTracks: z.array(z.object({
+    track: z.literal("caller_uplink"),
+    sourceRole: z.literal("uplink_capture"),
+    mediaType: z.literal("audio/wav"),
+    bytes: safePositive,
+    sha256: sha,
+    captureComplete: z.boolean(),
+    gapCount: z.number().int().nonnegative(),
+    droppedFrames: z.number().int().nonnegative(),
+  })).length(1).optional(),
   timeline: z.object({
     mediaType: z.literal("application/x-ndjson"),
     bytes: safePositive,
     sha256: sha,
   }),
 }).superRefine((value, ctx) => {
+  if ((value.archiveVersion === undefined) !== (value.uplinkTracks === undefined))
+    ctx.addIssue({ code: "custom", path: ["uplinkTracks"], message: "Uplink tracks and archiveVersion must appear together" });
   if ((value.version === 2) !== (value.derivedTracks === undefined))
     ctx.addIssue({ code: "custom", path: ["derivedTracks"], message: "Derived tracks must match manifest version" });
   if (new Set(value.tracks.map((item) => item.track)).size !== 2)
@@ -258,6 +309,7 @@ const pixelDescriptor = z.object({
     ctx.addIssue({ code: "custom", path: ["endedAt"], message: "endedAt precedes startedAt" });
 });
 export type PixelRecordingDescriptor = z.infer<typeof pixelDescriptor>;
+export type PixelTrack = RecordingTrack | "caller_playout" | "caller_uplink";
 export function parsePixelRecordingDescriptor(value: unknown): PixelRecordingDescriptor {
   return pixelDescriptor.parse(value);
 }
@@ -445,14 +497,14 @@ function objectMetadata(body: ManifestInput) {
       originalBytes: item.originalBytes,
       originalSha256: item.originalSha256,
     })),
-    ...(body.version === 3 ? body.derivedTracks.map((item) => ({
+    ...(body.version === 2 ? [] : [...(body.derivedTracks ?? []), ...(body.version === 4 ? body.uplinkTracks : [])].map((item) => ({
       name: item.objectName,
       kind: "wav",
       compressedBytes: item.compressedBytes,
       compressedSha256: item.compressedSha256,
       originalBytes: item.originalBytes,
       originalSha256: item.originalSha256,
-    })) : []),
+    }))),
     {
       name: body.timeline.objectName,
       kind: "timeline",
@@ -500,7 +552,7 @@ function expectedPixelDescriptor(
 ): PixelRecordingDescriptor {
   return {
     source: "pixel",
-    version: body.version,
+    version: body.version !== 2 && body.derivedTracks ? 3 : 2,
     archiveId: archive.id,
     callId: archive.call_id,
     manifestSha256: archive.client_manifest_sha256,
@@ -518,7 +570,7 @@ function expectedPixelDescriptor(
       gapCount: item.gapCount,
       droppedFrames: item.droppedFrames,
     })),
-    ...(body.version === 3 ? { derivedTracks: body.derivedTracks.map((item) => ({
+    ...(body.version !== 2 && body.derivedTracks ? { derivedTracks: body.derivedTracks.map((item) => ({
       track: item.track,
       sourceRole: item.sourceRole,
       mediaType: item.mediaType,
@@ -527,6 +579,16 @@ function expectedPixelDescriptor(
       playoutComplete: item.playoutComplete,
       gapCount: item.gapCount,
       recoveryFrames: item.recoveryFrames,
+    })) } : {}),
+    ...(body.version === 4 ? { archiveVersion: 4 as const, uplinkTracks: body.uplinkTracks.map((item) => ({
+      track: item.track,
+      sourceRole: item.sourceRole,
+      mediaType: item.mediaType,
+      bytes: item.originalBytes,
+      sha256: item.originalSha256,
+      captureComplete: item.captureComplete,
+      gapCount: item.gapCount,
+      droppedFrames: item.droppedFrames,
     })) } : {}),
     timeline: {
       mediaType: "application/x-ndjson",
@@ -546,17 +608,17 @@ function withPixelDurationMs(
     ...track,
     durationMs: Math.floor((pcmByTrack.get(track.track) ?? 0) / 32),
   }));
-  if (expected.derivedTracks === undefined || body.version !== 3) return { ...expected, tracks };
-  const pcmByDerived = new Map(
-    body.derivedTracks.map((item) => [item.track, item.pcmBytes] as const),
-  );
+  const withDuration = <T extends { track: string }>(items: T[], source: { track: string; pcmBytes: number }[]) =>
+    items.map((track) => ({
+      ...track,
+      durationMs: Math.floor((source.find((item) => item.track === track.track)?.pcmBytes ?? 0) / 32),
+    }));
+  const derived = body.version === 2 ? undefined : body.derivedTracks;
   return {
     ...expected,
     tracks,
-    derivedTracks: expected.derivedTracks.map((track) => ({
-      ...track,
-      durationMs: Math.floor((pcmByDerived.get(track.track) ?? 0) / 32),
-    })),
+    ...(expected.derivedTracks && derived ? { derivedTracks: withDuration(expected.derivedTracks, derived) } : {}),
+    ...(expected.uplinkTracks && body.version === 4 ? { uplinkTracks: withDuration(expected.uplinkTracks, body.uplinkTracks) } : {}),
   };
 }
 async function fsyncDir(path: string) {
@@ -1251,6 +1313,9 @@ export function registerRecordingArchiveRoutes(
             const playoutBytes = objects.find(
               (candidate) => candidate.object_name === "caller_playout.wav.gz",
             )?.original_bytes;
+            const uplinkBytes = objects.find(
+              (candidate) => candidate.object_name === "caller_uplink.wav.gz",
+            )?.original_bytes;
             try {
               ({ stdout } = await executeFile(
                 cfg.validator,
@@ -1272,6 +1337,7 @@ export function registerRecordingArchiveRoutes(
                         "--caller-bytes",
                         String(callerBytes),
                         ...(playoutBytes === undefined ? [] : ["--playout-bytes", String(playoutBytes)]),
+                        ...(uplinkBytes === undefined ? [] : ["--uplink-bytes", String(uplinkBytes)]),
                       ]
                     : []),
                 ],
@@ -1472,10 +1538,11 @@ export class PixelRecordingArchiveReader {
       throw new RecordingStoreError("RECORDING_CORRUPT");
     }
   }
-  async openTrack(callId: string, track: RecordingTrack | "caller_playout", rangeHeader?: string) {
+  async openTrack(callId: string, track: PixelTrack, rangeHeader?: string) {
     const manifest = await this.manifest(callId);
     if (!manifest) throw new RecordingStoreError("RECORDING_UNAVAILABLE");
-    const artifact = [...manifest.tracks, ...(manifest.derivedTracks ?? [])].find((item) => item.track === track);
+    const artifact = [...manifest.tracks, ...(manifest.derivedTracks ?? []), ...(manifest.uplinkTracks ?? [])]
+      .find((item) => item.track === track);
     if (!artifact) throw new RecordingStoreError("RECORDING_UNAVAILABLE");
     const range = recordingByteRange(rangeHeader, artifact.bytes);
     const path = join(this.root, callId, manifest.archiveId, `${track}.wav`);

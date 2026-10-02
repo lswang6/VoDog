@@ -84,6 +84,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.semantics.Role
@@ -543,9 +544,8 @@ internal fun PrimaryOwnedCallControls(
     val statusColor = if (ending) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary
     Icon(Icons.Filled.PhoneInTalk, contentDescription = null, tint = statusColor)
     Text(
-        callTitle(call),
+        phoneNumberTitle(callTitle(call)),
         style = MaterialTheme.typography.headlineSmall,
-        fontFamily = FontFamily.Monospace,
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
     )
@@ -721,13 +721,17 @@ internal fun PhoneKeypad(onDigit: (String) -> Unit, onPlus: () -> Unit, enabled:
         listOf("7" to "PQRS", "8" to "TUV", "9" to "WXYZ"),
         listOf("*" to "", "0" to "+", "#" to ""),
     )
+    // S92: the key grows with the font scale (capped) and the letters line is sized in sp, so digit +
+    // letters stay whole from 1.3 up; at 1.0 both are the old 68 dp / 12 dp.
+    val keySize = keypadKeySizeDp(LocalDensity.current.fontScale).dp
+    val lettersStyle = MaterialTheme.typography.labelSmall.copy(lineHeight = 12.sp)
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         rows.forEach { row ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                 row.forEach { (digit, letters) ->
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         Box(
-                            Modifier.size(68.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                            Modifier.size(keySize).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
                                 .combinedClickable(
                                     enabled = enabled,
                                     role = Role.Button,
@@ -738,7 +742,7 @@ internal fun PhoneKeypad(onDigit: (String) -> Unit, onPlus: () -> Unit, enabled:
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(digit, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace, color = keyColor)
-                                Text(letters, style = MaterialTheme.typography.labelSmall, modifier = Modifier.height(12.dp), color = keyColor)
+                                Text(letters, style = lettersStyle, maxLines = 1, softWrap = false, color = keyColor)
                             }
                         }
                     }
@@ -763,7 +767,7 @@ internal fun ActiveCallCard(call: JSONObject, state: ClientUiState, model: Clien
                 Icon(Icons.Filled.PhoneInTalk, null, tint = MaterialTheme.colorScheme.tertiary)
                 Text("当前通话", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.tertiary)
             }
-            Text(callTitle(call), style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace)
+            Text(phoneNumberTitle(callTitle(call)), style = MaterialTheme.typography.headlineSmall)
             Row(Modifier.fillMaxWidth()) {
                 Text(callStateLabel(callState), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))

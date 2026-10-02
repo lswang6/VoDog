@@ -7,18 +7,24 @@ export function ConfirmAction({
   confirmLabel,
   onConfirm,
   onCancel,
+  detail,
+  tone,
 }: {
   busy: boolean;
   prompt: string;
   confirmLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
+  detail?: string;
+  /** `neutral` drops the red destructive style (S87 open-link). */
+  tone?: 'neutral';
 }) {
   return (
     <div className="confirm-action" role="alertdialog">
       <p>{prompt}</p>
+      {detail && <p>{detail}</p>}
       <div className="record-actions">
-        <button type="button" className="passkey hangup" disabled={busy} onClick={onConfirm}>
+        <button type="button" className={tone === 'neutral' ? 'passkey' : 'passkey hangup'} disabled={busy} onClick={onConfirm}>
           {confirmLabel}
         </button>
         {/* Every ConfirmAction replaces the button just pressed, so focus follows to the safe choice. */}

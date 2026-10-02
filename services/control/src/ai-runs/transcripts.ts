@@ -1,4 +1,5 @@
 import type {QueryResult} from 'pg';
+import {tx,type Db} from '../db.js';
 import {AiRunError,assertLeaseOrJustEnded} from './repository.js';
 
 type Queryable={query:(sql:string,params?:unknown[])=>Promise<QueryResult<any>>};
@@ -14,12 +15,30 @@ export type TranscriptItem={role:'ai'|'caller';sequence:number;text:string;at:st
  *
  * S27 失败记录 6: the worker flushes its last batch only after the call is already `ended`, so this is
  * the one endpoint that accepts a just-expired lease — see `assertLeaseOrJustEnded`.
+ *
+ * S94b 死锁: the INSERT's two FK checks take `FOR KEY SHARE` on `ai_call_runs` and then `call_records`
+ * (RI trigger name order), the reverse of every hangup/reconciler path (gateway → call → run, all
+ * `FOR UPDATE`). So the parents are locked here explicitly in the canonical order, call before run,
+ * and the whole batch runs in `tx`, which re-runs it on 40P01/40001. A retry cannot duplicate: the
+ * victim attempt is fully rolled back and `ON CONFLICT (run_id,sequence) DO NOTHING` absorbs the rest.
  */
+export function storeAiTranscript(
+ db:Db,
+ input:{runId:string;instanceId:string;bootId:string;token:string;items:TranscriptItem[]},
+):Promise<{accepted:true;stored:number}>{
+ return tx(db,c=>appendAiTranscript(c,input),'ai.transcript');
+}
+
+/** Caller owns the transaction (`storeAiTranscript`); without one the row locks are released per statement. */
 export async function appendAiTranscript(
  db:Queryable,
  input:{runId:string;instanceId:string;bootId:string;token:string;items:TranscriptItem[]},
 ):Promise<{accepted:true;stored:number}>{
- const run=(await db.query(`SELECT id,call_id,state,ended_at,lease_owner,lease_boot_id,lease_hash,lease_until FROM ai_call_runs WHERE id=$1`,[input.runId])).rows[0];
+ // `call_id` never changes for a run, so the unlocked read only finds which call row to lock first.
+ const target=(await db.query(`SELECT call_id FROM ai_call_runs WHERE id=$1`,[input.runId])).rows[0];
+ if(!target)throw new AiRunError(404,'AI_RUN_NOT_FOUND','AI run was not found');
+ await db.query(`SELECT 1 FROM call_records WHERE id=$1 FOR KEY SHARE`,[target.call_id]);
+ const run=(await db.query(`SELECT id,call_id,state,ended_at,lease_owner,lease_boot_id,lease_hash,lease_until FROM ai_call_runs WHERE id=$1 FOR KEY SHARE`,[input.runId])).rows[0];
  if(!run)throw new AiRunError(404,'AI_RUN_NOT_FOUND','AI run was not found');
  assertLeaseOrJustEnded(run,input);
  if(!input.items.length)return {accepted:true,stored:0};

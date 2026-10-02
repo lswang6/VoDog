@@ -48,6 +48,8 @@ private val ARCHIVE_OBJECT_NAMES = listOf(
     "timeline.jsonl.gz",
 )
 private const val DERIVED_PLAYOUT_OBJECT_NAME = "caller_playout.wav.gz"
+/** S94: the optional v4 uplink original. */
+private const val UPLINK_OBJECT_NAME = "caller_uplink.wav.gz"
 
 internal data class ArchiveObject(
     val name: String,
@@ -278,9 +280,9 @@ internal class HttpRecordingArchiveControl(
     override fun finalize(uploadId: String, callId: String, manifestSha256: String, version: Int): String = json(
         "POST", GatewayApiRoutes.finalizeRecordingArchive(uploadId), ByteArray(0),
     ).getJSONObject("archive").let { archive ->
-        require(version in 2..3)
+        require(version in 2..4)
         require(archive.getString("id") == uploadId && archive.getString("callId") == callId)
-        require(archive.getString("source") == "pixel" && archive.strictLong("version", 2, 3) == version.toLong())
+        require(archive.getString("source") == "pixel" && archive.strictLong("version", 2, 4) == version.toLong())
         require(archive.getString("state") == "complete" && archive.getString("manifestSha256") == manifestSha256)
         requireSha256(archive.getString("manifestSha256"))
         Instant.parse(archive.getString("completedAt"))
@@ -494,8 +496,11 @@ internal fun processRecordingArchive(
     // S39 §决策3: `deleted_retained` is deliberately absent — a journal still holding the old
     // state is re-offered to the server, answered 410 again, and cleaned up on this pass.
     if (state.state in setOf("blocked", "auth_required")) return
-    val manifestFile = File(journal.directory(callId),
-        if (state.objects.any { it.name == DERIVED_PLAYOUT_OBJECT_NAME }) "manifest.v3.upload.json" else "manifest.v2.upload.json")
+    val manifestFile = File(journal.directory(callId), when {
+        state.objects.any { it.name == UPLINK_OBJECT_NAME } -> "manifest.v4.upload.json"
+        state.objects.any { it.name == DERIVED_PLAYOUT_OBJECT_NAME } -> "manifest.v3.upload.json"
+        else -> "manifest.v2.upload.json"
+    })
     require(manifestFile.isRegularNoFollow())
     val manifest = JSONObject(manifestFile.readText(Charsets.UTF_8))
     val gatewayGeneration = manifest.getJSONObject("captureBinding")
@@ -562,7 +567,7 @@ internal fun processRecordingArchive(
         }
     }
     requireArchiveOwner(shouldContinue)
-    control.finalize(uploadId, callId, state.manifestSha256, manifest.strictLong("version", 2, 3).toInt())
+    control.finalize(uploadId, callId, state.manifestSha256, manifest.strictLong("version", 2, 4).toInt())
     journal.write(state.copy(state = "cleanup_pending", nextAttemptAt = null, failureCode = null))
     cleanup(journal, callId, shouldContinue)
 }
@@ -580,13 +585,14 @@ private fun prepareRecordingArchive(
         "caller_original.wav" to "caller_original.wav.gz",
         "timeline.jsonl" to "timeline.jsonl.gz",
         ))
-        if (local.version == 3) add("caller_playout.wav" to DERIVED_PLAYOUT_OBJECT_NAME)
+        if (local.derivedTracks != null) add("caller_playout.wav" to DERIVED_PLAYOUT_OBJECT_NAME)
+        if (local.uplinkTracks != null) add("caller_uplink.wav" to UPLINK_OBJECT_NAME)
     }
     val sources = sourceNames.map { File(directory, it.first) }
     require(sources.all { it.isFile && !it.isSymbolicLink() })
     require(sources[0].length() in 44..MAX_WAV_BYTES && sources[1].length() in 44..MAX_WAV_BYTES)
     require(sources[2].length() in 1..MAX_TIMELINE_BYTES)
-    if (local.version == 3) require(sources[3].length() in 44..MAX_WAV_BYTES)
+    sources.drop(3).forEach { require(it.length() in 44..MAX_WAV_BYTES) }
     requireArchiveDiskCapacity(directory, sources.map(File::length), BuildConfig.RECORDING_ARCHIVE_MIN_FREE_BYTES)
     val compressed = sourceNames.map { (source, target) ->
         DeterministicGzip.compress(File(directory, source), File(directory, target), shouldContinue)
@@ -597,7 +603,7 @@ private fun prepareRecordingArchive(
 }
 
 internal fun requireArchiveDiskCapacity(directory: File, sourceBytes: List<Long>, minimumFreeBytes: Long) {
-    require(sourceBytes.size in 3..4 && sourceBytes.all { it > 0 } && minimumFreeBytes >= 0)
+    require(sourceBytes.size in 3..5 && sourceBytes.all { it > 0 } && minimumFreeBytes >= 0)
     val worstCase = sourceBytes.fold(0L) { total, bytes ->
         Math.addExact(total, Math.addExact(bytes, Math.addExact((bytes / 16_384L + 1L) * 8L, 128L)))
     }
@@ -614,6 +620,7 @@ private data class ParsedLocalManifest(
     val endedAt: String,
     val tracks: JSONObject,
     val derivedTracks: JSONObject?,
+    val uplinkTracks: JSONObject?,
     val timeline: JSONObject,
     val stats: JSONObject,
 )
@@ -622,7 +629,7 @@ private fun parseLocalManifest(directory: File, callId: String): ParsedLocalMani
     val manifestFile = File(directory, "manifest.json").also { require(it.isRegularNoFollow()) }
     val captureFile = File(directory, "capture.json").also { require(it.isRegularNoFollow()) }
     val manifest = JSONObject(manifestFile.readText(Charsets.UTF_8))
-    val version = manifest.strictLong("version", 2, 3).toInt()
+    val version = manifest.strictLong("version", 2, 4).toInt()
     require(manifest.getString("callId") == callId)
     val state = manifest.getString("terminalState")
     require(state in setOf("ended", "failed", "incomplete", "recovered_incomplete"))
@@ -645,33 +652,40 @@ private fun parseLocalManifest(directory: File, callId: String): ParsedLocalMani
         require(embedded.strictLong(it, 1, MAX_SAFE_INTEGER) == capture.strictLong(it, 1, MAX_SAFE_INTEGER))
     }
     val derived = manifest.optJSONObject("derivedTracks")
+    val uplink = manifest.optJSONObject("uplinkTracks")
     require(manifest.getJSONObject("tracks").length() == 2)
-    require((version == 2 && derived == null) ||
-        (version == 3 && derived != null && derived.length() == 1 && derived.has("caller_playout")))
+    val derivedValid = derived == null || (derived.length() == 1 && derived.has("caller_playout"))
+    require(derivedValid && ((version == 2 && derived == null && uplink == null) ||
+        (version == 3 && derived != null && uplink == null) ||
+        (version == 4 && uplink != null && uplink.length() == 1 && uplink.has("caller_uplink"))))
     return ParsedLocalManifest(version, callId, binding, state, manifest.getString("startedAt"), manifest.getString("endedAt"),
-        manifest.getJSONObject("tracks"), derived, manifest.getJSONObject("timeline"), manifest.optJSONObject("sessionStats") ?: JSONObject())
+        manifest.getJSONObject("tracks"), derived, uplink, manifest.getJSONObject("timeline"), manifest.optJSONObject("sessionStats") ?: JSONObject())
 }
 
 private fun uploadManifest(local: ParsedLocalManifest, objects: List<ArchiveObject>): JSONObject {
     val byName = objects.associateBy(ArchiveObject::name)
     val tracks = JSONArray()
-    listOf("remote_original", "caller_original").forEach { track ->
-        val localTrack = local.tracks.getJSONObject(track)
+    fun originalTrack(source: JSONObject, track: String, sourceRole: String?): JSONObject {
+        val localTrack = source.getJSONObject(track)
         val compressed = requireNotNull(byName["$track.wav.gz"])
         require(localTrack.getString("file") == "$track.wav" &&
             localTrack.strictLong("bytes", 1, MAX_SAFE_INTEGER) == compressed.originalBytes &&
             localTrack.getString("sha256") == compressed.originalSha256)
-        tracks.put(JSONObject().put("track", track).put("objectName", compressed.name).put("mediaType", "audio/wav")
+        return JSONObject().put("track", track).also { if (sourceRole != null) it.put("sourceRole", sourceRole) }
+            .put("objectName", compressed.name).put("mediaType", "audio/wav")
             .put("pcm", JSONObject().put("sampleRate", 16000).put("channels", 1).put("bitsPerSample", 16).put("encoding", "pcm_s16le"))
             .put("compressedBytes", compressed.compressedBytes).put("compressedSha256", compressed.compressedSha256)
             .put("originalBytes", compressed.originalBytes).put("originalSha256", compressed.originalSha256)
             .put("pcmBytes", localTrack.strictLong("pcmBytes", 0, MAX_SAFE_INTEGER))
             .put("gapCount", localTrack.strictLong("gapCount", 0, MAX_SAFE_INTEGER))
             .put("droppedFrames", localTrack.strictLong("droppedFrames", 0, MAX_SAFE_INTEGER))
-            .put("captureComplete", localTrack.strictBoolean("captureComplete")))
+            .put("captureComplete", localTrack.strictBoolean("captureComplete"))
     }
+    listOf("remote_original", "caller_original").forEach { track -> tracks.put(originalTrack(local.tracks, track, null)) }
+    // S94: v4 only; `derivedTracks` stays absent (never `[]`) when there is no playout track.
+    val uplinkTracks = local.uplinkTracks?.let { JSONArray().put(originalTrack(it, "caller_uplink", "uplink_capture")) }
     val derivedTracks = JSONArray()
-    if (local.version == 3) {
+    if (local.derivedTracks != null) {
         val localTrack = requireNotNull(local.derivedTracks).getJSONObject("caller_playout")
         val compressed = requireNotNull(byName[DERIVED_PLAYOUT_OBJECT_NAME])
         require(localTrack.getString("file") == "caller_playout.wav" &&
@@ -697,7 +711,8 @@ private fun uploadManifest(local: ParsedLocalManifest, objects: List<ArchiveObje
         .put("telecomCreationTimeMillis", binding.telecomCreationTimeMillis).put("captureGeneration", binding.captureGeneration))
         .put("startedAt", ISO_MILLIS.format(Instant.parse(local.startedAt)))
         .put("endedAt", ISO_MILLIS.format(Instant.parse(local.endedAt))).put("terminalState", local.terminalState)
-        .put("tracks", tracks).also { if (local.version == 3) it.put("derivedTracks", derivedTracks) }
+        .put("tracks", tracks).also { if (local.derivedTracks != null) it.put("derivedTracks", derivedTracks) }
+        .also { if (uplinkTracks != null) it.put("uplinkTracks", uplinkTracks) }
         .put("timeline", JSONObject().put("objectName", timeline.name)
             .put("mediaType", "application/x-ndjson").put("compressedBytes", timeline.compressedBytes)
             .put("compressedSha256", timeline.compressedSha256).put("originalBytes", timeline.originalBytes)
@@ -830,6 +845,7 @@ private fun validateFrozenArchiveObjects(
         "caller_original.wav.gz" to "caller_original.wav",
         "timeline.jsonl.gz" to "timeline.jsonl",
         DERIVED_PLAYOUT_OBJECT_NAME to "caller_playout.wav",
+        UPLINK_OBJECT_NAME to "caller_uplink.wav",
     )
     objects.forEach { expected ->
         requireArchiveOwner(shouldContinue)
@@ -859,6 +875,9 @@ private fun requireJournalMatchesImmutableManifest(objects: List<ArchiveObject>,
         repeat(tracks.length()) { add(pinned(tracks.getJSONObject(it))) }
         manifest.optJSONArray("derivedTracks")?.let { derived ->
             repeat(derived.length()) { add(pinned(derived.getJSONObject(it))) }
+        }
+        manifest.optJSONArray("uplinkTracks")?.let { uplink ->
+            repeat(uplink.length()) { add(pinned(uplink.getJSONObject(it))) }
         }
         add(pinned(manifest.getJSONObject("timeline")))
     }
@@ -943,7 +962,8 @@ private fun requireValidArchiveObjects(objects: List<ArchiveObject>) {
     val names = objects.map(ArchiveObject::name)
     val expectedV2 = ARCHIVE_OBJECT_NAMES.toSet()
     val expectedV3 = expectedV2 + DERIVED_PLAYOUT_OBJECT_NAME
-    require(names.distinct().size == names.size && names.toSet() in setOf(expectedV2, expectedV3))
+    require(names.distinct().size == names.size &&
+        names.toSet() in setOf(expectedV2, expectedV3, expectedV2 + UPLINK_OBJECT_NAME, expectedV3 + UPLINK_OBJECT_NAME))
 }
 
 internal fun canonicalFingerprint(value: JSONObject): String =

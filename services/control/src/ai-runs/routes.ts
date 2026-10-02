@@ -8,7 +8,7 @@ import {AiRunError,AI_PROTOCOL,authorizeAiMedia,claimAiRun,commitAiAnswer,failAi
 import {VOICE_PROVIDER_ID} from './voice-providers.js';
 import {diag} from '../diag.js';
 import {MediaBridgeError} from '../media-client.js';
-import {AI_TRANSCRIPT_MAX_BATCH,AI_TRANSCRIPT_MAX_TEXT,appendAiTranscript} from './transcripts.js';
+import {AI_TRANSCRIPT_MAX_BATCH,AI_TRANSCRIPT_MAX_TEXT,storeAiTranscript} from './transcripts.js';
 
 type Fail=(status:number,code:string,message:string,details?:unknown)=>never;
 const workerIdentity=z.object({instanceId:z.uuid(),bootId:z.uuid()});
@@ -79,7 +79,7 @@ export function registerAiRunRoutes(app:FastifyInstance,db:Db,config:Config,medi
       text:z.string().min(1).max(AI_TRANSCRIPT_MAX_TEXT),
       at:z.string().refine(value=>Number.isFinite(Date.parse(value)),'Invalid transcript timestamp'),
     })).min(1).max(AI_TRANSCRIPT_MAX_BATCH)}).parse(req.body);
-    try{return await appendAiTranscript(db,{runId,token:lease(req),...body});}catch(error){return mapError(error);}
+    try{return await storeAiTranscript(db,{runId,token:lease(req),...body});}catch(error){return mapError(error);}
   });
   app.get('/internal/v1/ai/runs/:runId',async req=>{
     requireService(req);const {runId}=z.object({runId:z.uuid()}).parse(req.params),query=workerIdentity.parse(req.query);
